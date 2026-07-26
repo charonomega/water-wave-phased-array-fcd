@@ -616,29 +616,21 @@ class LabviewMimicGUI:
                 r1 = self.controller.write_channel_enables(1, enables[0:8])
                 r2 = self.controller.write_channel_enables(2, enables[8:16])
                 r3 = self.controller.write_channel_enables(3, enables[16:24])
-                self.log(f"🔄 24通道开关更新 -> 板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
+                self.log(f"24通道开关更新 -> 板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
             else:
-                board_id = int(mode.split()[0]) if "所有" not in mode else 0
-                resp = self.controller.write_channel_enables(board_id, enables)
-                self.log(f"🔄 通道开关已实时更新 -> 返回: {resp}")
+                b_id = self._get_board_id(mode) or 0
+                resp = self.controller.write_channel_enables(b_id, enables)
+                self.log(f"通道开关已实时更新 -> 返回: {resp}")
 
     def stop_all_speakers(self):
-        self._cancel_flag = True 
+        self._cancel_flag = True
         if not self.controller: return
         mode = self.board_var.get()
-        self.log(f"\n--- 🛑 执行快捷操作: 一键停止 ({mode}) ---")
+        self.log(f"\n--- 执行快捷操作: 一键停止 ({mode}) ---")
         try:
-            if "24通道" in mode:
-                r1 = self.controller.stop_all(1)
-                r2 = self.controller.stop_all(2)
-                r3 = self.controller.stop_all(3)
-                self.log(f"停止指令已下发。板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
-            else:
-                board_id = int(mode.split()[0]) if "所有" not in mode else 0
-                resp = self.controller.stop_all(board_id)
-                self.log(f"停止指令已下发。返回结果: {resp}")
+            self._for_each_board(mode, lambda b: self.controller.stop_all(b), "停止")
         except Exception as e:
-            self.log(f"❌ 执行出错: {str(e)}")
+            self.log(f"执行出错: {str(e)}")
 
     # 🌟 核心修复：精确对口且【全局跨板锚定】的 LUT 映射引擎
     def _apply_lut_calibration(self, params, board_idx):
@@ -804,13 +796,13 @@ class LabviewMimicGUI:
                 self.controller.write_waveform_params(3, cal_3)
                 self.root.after(0, self.log, "⏳ 定时参数已下发 (24通道，独立查表映射后)。")
             else:
-                b_id = int(mode.split()[0]) if "所有" not in mode else 0
+                b_id = self._get_board_id(mode) or 0
                 lut_idx = b_id if b_id in [1, 2, 3] else 1
                 cal = self._apply_lut_calibration(params[0:8], board_idx=lut_idx)
                 resp = self.controller.write_waveform_params(b_id, cal)
-                self.root.after(0, self.log, f"⏳ 定时参数已下发 (查表映射后)。返回: {resp}")
+                self.root.after(0, self.log, f"定时参数已下发 (查表映射后)。返回: {resp}")
         except Exception as e:
-            self.root.after(0, self.log, f"⛔ 下发异常: {e}")
+            self.root.after(0, self.log, f"下发异常: {e}")
             return
 
         if self._cancel_flag: return
@@ -825,14 +817,34 @@ class LabviewMimicGUI:
                     if "24通道" in mode:
                         self.controller.stop_all(1); self.controller.stop_all(2); self.controller.stop_all(3)
                     else:
-                        b_id = int(mode.split()[0]) if "所有" not in mode else 0
+                        b_id = self._get_board_id(mode) or 0
                         self.controller.stop_all(b_id)
-                    self.root.after(0, self.log, "⏳ 已按计划自动停止。")
+                    self.root.after(0, self.log, "已按计划自动停止。")
                 except Exception: pass
+
+    def _get_board_id(self, mode):
+        """从模式字符串提取板号。24通道返回 None。"""
+        if "24通道" in mode:
+            return None
+        return int(mode.split()[0]) if "所有" not in mode else 0
+
+    def _for_each_board(self, mode, fn, label=""):
+        """统一的1板/3板调度器。fn(board_id) 在每块板上执行。
+        返回: (is_multi, results) — is_multi=True 时 results 为包含3个结果的列表。
+        """
+        if "24通道" in mode:
+            results = [fn(1), fn(2), fn(3)]
+            self.log(f"{label}-> 板1:[{results[0]}] 板2:[{results[1]}] 板3:[{results[2]}]")
+            return True, results
+        else:
+            b_id = int(mode.split()[0]) if "所有" not in mode else 0
+            result = fn(b_id)
+            self.log(f"{label}返回: {result}")
+            return False, result
 
     def execute_operation(self):
         if not self.controller: return
-        self.save_hardware_config() 
+        self.save_hardware_config()
         mode = self.board_var.get()
         op_id = int(self.op_var.get().split(":")[0])
         num_channels = len(self.enables_vars)
@@ -840,28 +852,21 @@ class LabviewMimicGUI:
 
         try:
             if op_id == 0:
-                if "24通道" in mode:
-                    r1 = self.controller.test_connection(1)
-                    r2 = self.controller.test_connection(2)
-                    r3 = self.controller.test_connection(3)
-                    self.log(f"返回(24通道):\n板1: {r1}\n板2: {r2}\n板3: {r3}")
-                else:
-                    b_id = int(mode.split()[0]) if "所有" not in mode else 0
-                    self.log(f"返回: {self.controller.test_connection(b_id)}")
-                    
+                self._for_each_board(mode, lambda b: self.controller.test_connection(b), "连接测试")
+
             elif op_id == 1:
                 params = []
                 enables = [var.get() for var in self.enables_vars]
                 for i in range(num_channels):
                     final_amp = self.amp_vars[i].get() if enables[i] else 0.0
                     params.append({"amp": final_amp, "phase": self.phase_vars[i].get(), "period": self.period_vars[i].get()})
-                
+
                 delay, duration = self.delay_var.get(), self.duration_var.get()
                 if delay > 0 or duration > 0:
-                    self._cancel_flag = False 
-                    threading.Thread(target=self._timed_execution_thread, args=(mode, params, delay, duration), daemon=True).start()
+                    self._cancel_flag = False
+                    threading.Thread(target=self._timed_execution_thread,
+                                     args=(mode, params, delay, duration), daemon=True).start()
                 else:
-                    # 🌟 核心修改 6：立即执行时参数切片与独立映射并发下发
                     if "24通道" in mode:
                         cal_1 = self._apply_lut_calibration(params[0:8], board_idx=1)
                         cal_2 = self._apply_lut_calibration(params[8:16], board_idx=2)
@@ -871,23 +876,15 @@ class LabviewMimicGUI:
                         r3 = self.controller.write_waveform_params(3, cal_3)
                         self.log(f"24路独立参数已并发下发。返回-> 板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
                     else:
-                        b_id = int(mode.split()[0]) if "所有" not in mode else 0
+                        b_id = self._get_board_id(mode) or 0
                         lut_idx = b_id if b_id in [1, 2, 3] else 1
                         cal = self._apply_lut_calibration(params[0:8], board_idx=lut_idx)
                         resp = self.controller.write_waveform_params(b_id, cal)
                         self.log(f"参数已下发 (独立查表映射后)。返回: {resp}")
-                        
+
             elif op_id == 2:
-                if "24通道" in mode:
-                    r1 = self.controller.read_waveform_params(1)
-                    r2 = self.controller.read_waveform_params(2)
-                    r3 = self.controller.read_waveform_params(3)
-                    self.log(f"读取波形(24通道):\n板1: {r1}\n板2: {r2}\n板3: {r3}")
-                else:
-                    b_id = int(mode.split()[0]) if "所有" not in mode else 0
-                    resp = self.controller.read_waveform_params(b_id)
-                    self.log(f"读取结果: {resp}")
-                    
+                self._for_each_board(mode, lambda b: self.controller.read_waveform_params(b), "读取波形")
+
             elif op_id == 3:
                 enables = [var.get() for var in self.enables_vars]
                 if "24通道" in mode:
@@ -896,37 +893,21 @@ class LabviewMimicGUI:
                     r3 = self.controller.write_channel_enables(3, enables[16:24])
                     self.log(f"使能已下发。返回-> 板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
                 else:
-                    b_id = int(mode.split()[0]) if "所有" not in mode else 0
+                    b_id = self._get_board_id(mode) or 0
                     resp = self.controller.write_channel_enables(b_id, enables)
                     self.log(f"使能状态已下发。返回结果: {resp}")
-                    
+
             elif op_id == 4:
-                if "24通道" in mode:
-                    r1 = self.controller.save_configuration(1)
-                    r2 = self.controller.save_configuration(2)
-                    r3 = self.controller.save_configuration(3)
-                    self.log(f"保存配置返回-> 板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
-                else:
-                    b_id = int(mode.split()[0]) if "所有" not in mode else 0
-                    resp = self.controller.save_configuration(b_id)
-                    self.log(f"保存配置返回: {resp}")
-                    
+                self._for_each_board(mode, lambda b: self.controller.save_configuration(b), "保存配置")
+
             elif op_id == 5:
-                if "24通道" in mode:
-                    r1 = self.controller.reset_device(1)
-                    r2 = self.controller.reset_device(2)
-                    r3 = self.controller.reset_device(3)
-                    self.log(f"复位返回-> 板1:[{r1}] 板2:[{r2}] 板3:[{r3}]")
-                else:
-                    b_id = int(mode.split()[0]) if "所有" not in mode else 0
-                    resp = self.controller.reset_device(b_id)
-                    self.log(f"设备复位返回: {resp}")
+                self._for_each_board(mode, lambda b: self.controller.reset_device(b), "设备复位")
 
         except ValueError as ve:
-            self.log(f"⛔ 安全拦截: {str(ve)}")
+            self.log(f"安全拦截: {str(ve)}")
             messagebox.showerror("硬件安全警告", str(ve))
         except Exception as e:
-            self.log(f"❌ 执行出错: {str(e)}")
+            self.log(f"执行出错: {str(e)}")
             self.log(traceback.format_exc())
     
     def load_camera_config_file(self):
