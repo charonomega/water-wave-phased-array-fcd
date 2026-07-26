@@ -1,29 +1,24 @@
+import json
+import math
 import os
+import time
+
 import cv2
 import numpy as np
-from scipy.fft import fft2, ifft2, fftfreq, fftshift, ifftshift
-from scipy.signal import hilbert
 from datetime import datetime
-import math
-from scipy.signal import hilbert, butter, filtfilt # 🌟 新增滤波
-from scipy.optimize import curve_fit               # 🌟 新增曲线拟合
-from scipy.signal.windows import tukey
+from scipy.fft import fft2, ifft2, fftfreq, fftshift, ifftshift
+from scipy.optimize import curve_fit
+from scipy.signal import hilbert, butter, filtfilt
 
 # 强行切换到 Agg 后端，确保多线程下终端不卡死
 import matplotlib
 matplotlib.use('Agg', force=True)
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.path import Path 
-
-import json
-from scipy.signal import hilbert
 import matplotlib.patches as patches
+import matplotlib.ticker as ticker
+from matplotlib.path import Path
 
-import time
-import matplotlib.lines as mlines
-
-# 100% 确保支持中文字符与负号渲染
+# 确保支持中文字符与负号渲染
 matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'PingFang SC', 'Arial Unicode MS', 'sans-serif']
 matplotlib.rcParams['axes.unicode_minus'] = False 
 
@@ -133,7 +128,6 @@ class MasterCircleSelector:
 
     def on_key(self, event):
         if event.key == 'enter' and self.state == 'done':
-            import matplotlib.pyplot as plt
             plt.close(self.fig)
 
 # =====================================================================
@@ -239,7 +233,6 @@ class MasterLineSelector:
 
     def on_key(self, event):
         if event.key == 'enter' and self.state == 'done':
-            import matplotlib.pyplot as plt
             plt.close(self.fig)
 
 class InteractiveMeasurer:
@@ -406,7 +399,6 @@ class InteractiveMeasurer:
         elif event.key in ['c', 'C'] and self.mode == 'pl' and self.state in ['adjust', 'pan_l1', 'pan_l2']:
             self.commit_measurement()
         elif event.key == 'enter':
-            import matplotlib.pyplot as plt
             plt.close(self.fig)
 
     def on_press(self, event):
@@ -716,31 +708,6 @@ class FCDCore:
             'A_pinv': A_pinv
         }
         return self._bg_cache
-    
-    # def _get_bg_cache(self, shape):
-    #     """生成并缓存伪逆矩阵，使得曲面拟合降维为纯乘法运算"""
-    #     if hasattr(self, '_bg_cache') and self._bg_cache['shape'] == shape:
-    #         return self._bg_cache
-
-    #     rows, cols = shape
-    #     X, Y = np.meshgrid(np.linspace(-1, 1, cols), np.linspace(-1, 1, rows))
-    #     X_f, Y_f = X.flatten(), Y.flatten()
-
-    #     A = np.column_stack((
-    #         np.ones_like(X_f), X_f, Y_f,
-    #         X_f**2, Y_f**2, X_f*Y_f,
-    #         X_f**3, Y_f**3, (X_f**2)*Y_f, X_f*(Y_f**2)
-    #     ))
-
-    #     # 🌟 预计算 Moore-Penrose 伪逆 (耗时约0.5秒，但只执行一次)
-    #     A_pinv = np.linalg.pinv(A)
-
-    #     self._bg_cache = {
-    #         'shape': shape,
-    #         'A': A,
-    #         'A_pinv': A_pinv
-    #     }
-    #     return self._bg_cache
 
     def _prepare_cache(self, Iref):
         if getattr(self, '_cache_valid', False) and getattr(self, '_cached_shape', None) == Iref.shape:
@@ -810,16 +777,6 @@ class FCDCore:
 
         return d_x_inp, d_y_inp
 
-    # def _remove_background_surface(self, h, order=3):
-    #     """极速曲面清洗器 (耗时从数百毫秒降低至几毫秒)"""
-    #     c = self._get_bg_cache(h.shape)
-        
-    #     # O(N) 一步矩阵乘法直接获取 10 个曲面系数，避免每一帧都跑 lstsq 求解器
-    #     C = c['A_pinv'] @ h.flatten()
-    #     bg = (c['A'] @ C).reshape(h.shape)
-        
-    #     return h - bg
-    
     def _get_sylv_cache(self, m, n):
         """生成并缓存积分器所需的所有降维、特征值与逆矩阵 (仅在第一帧耗时)"""
         if hasattr(self, '_sylv_cache') and self._sylv_cache['shape'] == (m, n):
@@ -1024,10 +981,6 @@ class FCDCore:
                      fontsize=10, pad=10, fontweight='bold', loc='center')
 
     def analyze_single_frame(self):
-        import matplotlib
-        matplotlib.use('Agg', force=True)
-        import matplotlib.pyplot as plt
-        import os, time
 
         if not self.ref_path or not os.path.exists(self.ref_path):
             raise ValueError("未选择有效的参考图像！")
@@ -1216,8 +1169,6 @@ class FCDCore:
 
     def find_pixels(self):
         matplotlib.use('TkAgg', force=True)
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as patches
 
         img = self._read_and_crop(self.ref_path)
         img_height, img_width = img.shape[:2]
@@ -1314,10 +1265,7 @@ class FCDCore:
         return points, self.write_log("FindPixels", log_c, target_dir=find_dir)
 
     def measure_distance(self):
-        import matplotlib
         matplotlib.use('TkAgg', force=True)
-        import matplotlib.pyplot as plt
-        import os, time
 
         if not self.ref_path or not self.def_path:
             raise ValueError("请先配置静态参考图和形变图路径！")
@@ -1393,7 +1341,6 @@ class FCDCore:
 
     def calculate_q_value(self):
         matplotlib.use('TkAgg', force=True)
-        import matplotlib.pyplot as plt
         from matplotlib.widgets import PolygonSelector
         h, u, v, _ = self.process_single_frame()
         R_mag = np.sqrt(u**2 + v**2 + h**2 + 1e-10)
@@ -1537,28 +1484,6 @@ class FCDCore:
         v_ana = np.conj(hilbert(v_stack, axis=0)).astype(np.complex64)
         del v_stack
         gc.collect()
-
-        # pad_len = frames // 2
-        # pad_cfg = ((pad_len, pad_len), (0, 0), (0, 0))
-        
-        # # 使用 reflect 配合 odd 模式
-        # h_pad = np.pad(h_stack, pad_cfg, mode='reflect', reflect_type='odd')
-        # del h_stack
-        # h_ana = np.conj(hilbert(h_pad, axis=0)[pad_len : pad_len + frames]).astype(np.complex64)
-        # del h_pad
-        # gc.collect()
-        
-        # u_pad = np.pad(u_stack, pad_cfg, mode='reflect', reflect_type='odd')
-        # del u_stack
-        # u_ana = np.conj(hilbert(u_pad, axis=0)[pad_len : pad_len + frames]).astype(np.complex64)
-        # del u_pad
-        # gc.collect()
-        
-        # v_pad = np.pad(v_stack, pad_cfg, mode='reflect', reflect_type='odd')
-        # del v_stack
-        # v_ana = np.conj(hilbert(v_pad, axis=0)[pad_len : pad_len + frames]).astype(np.complex64)
-        # del v_pad
-        # gc.collect()
 
         phase_w = np.mod(np.angle(h_ana), 2*np.pi)
         dt = 1.0 / fps if fps > 0 else 1.0 / 30.0
