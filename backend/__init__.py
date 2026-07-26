@@ -1,7 +1,6 @@
-"""FCD 波场分析系统 - 向后兼容桥接模块。
+"""FCD 波场分析系统 - 后端计算引擎包。
 
-此文件为兼容旧版导入而保留。实际实现已拆分至 `backend/` 包中。
-请优先使用 `from backend import FCDCore`。
+提供 FCD 解调、Sylvester 积分、时频域分析、定标及交互式 UI 选择器。
 """
 
 from backend.core import FCDCore, sine_fit_func

@@ -3,7 +3,7 @@ from tkinter import ttk, filedialog, scrolledtext, messagebox
 import traceback
 import json
 import os
-from fcd_backend_syl_circ import FCDCore
+from backend import FCDCore
 
 class FCDApp:
     def __init__(self, root):
