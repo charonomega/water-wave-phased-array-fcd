@@ -38,8 +38,8 @@ class FCDApp:
 
         cfg_btn_frame = ttk.Frame(path_frame)
         cfg_btn_frame.grid(row=4, column=0, columnspan=3, pady=4, sticky="ew")
-        ttk.Button(cfg_btn_frame, text="💾 保存当前全部配置(含高级参数)", command=self.save_path_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(cfg_btn_frame, text="📂 手动重载配置", command=self.load_path_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(cfg_btn_frame, text="保存当前全部配置(含高级参数)", command=self.save_path_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(cfg_btn_frame, text="手动重载配置", command=self.load_path_config).pack(side=tk.LEFT, padx=5)
 
         # 2. 基础参数配置区
         self.param_frame = ttk.LabelFrame(self.root, text="基础物理与裁剪参数", padding=10)
@@ -93,7 +93,7 @@ class FCDApp:
         self.adv_qscale = ttk.Entry(q_frame, width=3); self.adv_qscale.pack(side=tk.LEFT)
         ttk.Label(self.adv_frame, text="步距越小越密 / 缩放越大越长", font=("", 8), foreground="dimgray").grid(row=4, column=2, sticky="w", padx=5)
 
-        # 🌟 新增项 6：三维位移箭头专属
+        # 新增项 6：三维位移箭头专属
         ttk.Label(self.adv_frame, text="6. 3D位移箭头(步距/缩放):").grid(row=5, column=0, sticky="e", pady=2)
         d_frame = ttk.Frame(self.adv_frame); d_frame.grid(row=5, column=1, sticky="w")
         self.adv_dstep = ttk.Entry(d_frame, width=3); self.adv_dstep.pack(side=tk.LEFT)
@@ -101,7 +101,7 @@ class FCDApp:
         self.adv_dscale = ttk.Entry(d_frame, width=3); self.adv_dscale.pack(side=tk.LEFT)
         ttk.Label(self.adv_frame, text="步距越小越密 / 缩放越大越长", font=("", 8), foreground="dimgray").grid(row=5, column=2, sticky="w", padx=5)
 
-        # 🌟 原先的项 6 顺延变为项 7
+        # 原先的项 6 顺延变为项 7
         ttk.Label(self.adv_frame, text="7. 序列批量图窗导出项开关:").grid(row=6, column=0, sticky="ne", pady=8)
         seq_frm = ttk.Frame(self.adv_frame)
         seq_frm.grid(row=6, column=1, columnspan=2, sticky="w", pady=5)
@@ -109,7 +109,7 @@ class FCDApp:
         self.chk_hf = tk.BooleanVar(value=True); self.chk_disp = tk.BooleanVar(value=True); self.chk_sz = tk.BooleanVar(value=True)
         self.chk_amp = tk.BooleanVar(value=True); self.chk_ndisp = tk.BooleanVar(value=True); self.chk_s3d = tk.BooleanVar(value=True)
         self.chk_ph = tk.BooleanVar(value=True); self.chk_pa = tk.BooleanVar(value=True); self.chk_mom = tk.BooleanVar(value=True)
-        # 🌟 新增：斯格明子高级拓扑可视化控制变量
+        # 新增：斯格明子高级拓扑可视化控制变量
         self.chk_3ddisp = tk.BooleanVar(value=True)
         self.chk_3dspin = tk.BooleanVar(value=True)
 
@@ -142,7 +142,7 @@ class FCDApp:
         
         ttk.Label(cal_frame, text="定标序列总目录:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
         ttk.Entry(cal_frame, textvariable=self.cal_dir, width=40, state="readonly").grid(row=0, column=1, columnspan=3, sticky="w")
-        ttk.Button(cal_frame, text="📂 浏览目录", command=lambda: self.cal_dir.set(filedialog.askdirectory(title="选择定标数据的总文件夹"))).grid(row=0, column=4, padx=5)
+        ttk.Button(cal_frame, text="浏览目录", command=lambda: self.cal_dir.set(filedialog.askdirectory(title="选择定标数据的总文件夹"))).grid(row=0, column=4, padx=5)
         
         ttk.Label(cal_frame, text="定标拍摄 FPS:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
         ttk.Entry(cal_frame, textvariable=self.cal_fps, width=10).grid(row=1, column=1, sticky="w")
@@ -159,7 +159,7 @@ class FCDApp:
         self.log("系统就绪。高级调参机制已建立。")
 
     def toggle_advanced_menu(self):
-        """🌟 菜单点击动态展开或收起"""
+        """菜单点击动态展开或收起"""
         if self.adv_frame.winfo_viewable():
             self.adv_frame.pack_forget()
             self.toggle_btn.config(text="▶ 展开微调参数菜单")
@@ -288,8 +288,8 @@ class FCDApp:
             
             q_step=safe_int(self.adv_qstep.get(), 6),
             q_scale=safe_float(self.adv_qscale.get(), 4.0),
-            disp_step=safe_int(self.adv_dstep.get(), 8),         # 🌟 新增传递
-            disp_scale=safe_float(self.adv_dscale.get(), 14.0)   # 🌟 新增传递
+            disp_step=safe_int(self.adv_dstep.get(), 8),         # 新增传递
+            disp_scale=safe_float(self.adv_dscale.get(), 14.0)   # 新增传递
         )
         core.out_3ddisp = self.chk_3ddisp.get()
         core.out_3dspin = self.chk_3dspin.get()
@@ -304,7 +304,7 @@ class FCDApp:
         try:
             task_func()
         except Exception as e:
-            self.log(f"❌ 执行出错: {str(e)}\n{traceback.format_exc()}")
+            self.log(f"执行出错: {str(e)}\n{traceback.format_exc()}")
 
     def _task_findpixels(self):
         temp_core = self._get_core()
@@ -348,7 +348,7 @@ class FCDApp:
             period = float(self.cal_period.get())
             calib_dir = self.cal_dir.get()
         except ValueError:
-            self.log("❌ 参数输入错误，请确保输入的是数字！")
+            self.log("参数输入错误，请确保输入的是数字！")
             return
             
         self.log(f"\n准备进行声学定标解析...\n参数 - FPS:{fps}, 周期:{period}ms")

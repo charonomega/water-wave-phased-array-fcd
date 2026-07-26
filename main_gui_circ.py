@@ -31,20 +31,20 @@ class LabviewMimicGUI:
         self.camera = None 
         self.config = AppConfig("hardware_param_cache.json")
         
-        # 🌟 核心修改 1：为 3 块板子分配独立的 LUT 内存和路径变量
+        # 核心修改 1：为 3 块板子分配独立的 LUT 内存和路径变量
         self.calib_vars = [tk.StringVar() for _ in range(3)]
         self.lut_data_list = [None, None, None] 
         self._cancel_flag = False  
 
-        # 🌟 新增：相机官方配置文件及矫正开关变量
+        # 新增：相机官方配置文件及矫正开关变量
         self.cam_config_var = tk.StringVar(value="")
         self.use_undistort_var = tk.BooleanVar(value=False)
         self.use_ffc_var = tk.BooleanVar(value=False)
         
-       # 🌟 新增：独立图片序列的拍摄时长控制变量 (默认 2.0 秒)
+       # 新增：独立图片序列的拍摄时长控制变量 (默认 2.0 秒)
         self.camera_duration = tk.DoubleVar(value=2.0)
 
-        # 🌟 新增：多极波场发生器的状态变量
+        # 新增：多极波场发生器的状态变量
         self.multipole_type_var = tk.StringVar(value="偶极子")
         self.multipole_period_var = tk.IntVar(value=150)
         self.multipole_omega1_var = tk.DoubleVar(value=0.0)
@@ -65,14 +65,14 @@ class LabviewMimicGUI:
         port_frame.grid(row=0, column=1, padx=5)
         self.port_cb = ttk.Combobox(port_frame, textvariable=self.port_var, width=8, state="readonly")
         self.port_cb.pack(side=tk.LEFT)
-        self.refresh_btn = ttk.Button(port_frame, text="🔄", width=3, command=self.scan_ports)
+        self.refresh_btn = ttk.Button(port_frame, text="刷新", width=3, command=self.scan_ports)
         self.refresh_btn.pack(side=tk.LEFT, padx=(2, 0))
         
         conn_frame = ttk.Frame(top_frame)
         conn_frame.grid(row=0, column=2, padx=0)
-        self.connect_btn = ttk.Button(conn_frame, text="🔌连接串口", command=self.toggle_connection)
+        self.connect_btn = ttk.Button(conn_frame, text="连接串口", command=self.toggle_connection)
         self.connect_btn.pack(side=tk.LEFT, padx=2)
-        self.connect_cam_btn = ttk.Button(conn_frame, text="📸连接相机", command=self.toggle_camera)
+        self.connect_cam_btn = ttk.Button(conn_frame, text="连接相机", command=self.toggle_camera)
         self.connect_cam_btn.pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(top_frame, orient=tk.VERTICAL).grid(row=0, column=3, sticky="ns", padx=10)
@@ -90,10 +90,10 @@ class LabviewMimicGUI:
         op_cb = ttk.Combobox(top_frame, textvariable=self.op_var, values=op_values, width=16, state="readonly")
         op_cb.grid(row=0, column=7, padx=5)
 
-        self.execute_btn = ttk.Button(top_frame, text="▶ 执行", command=self.execute_operation, state=tk.DISABLED)
+        self.execute_btn = ttk.Button(top_frame, text="执行", command=self.execute_operation, state=tk.DISABLED)
         self.execute_btn.grid(row=0, column=8, padx=5)
 
-        self.stop_btn = ttk.Button(top_frame, text="🛑 一键停止", command=self.stop_all_speakers, state=tk.DISABLED)
+        self.stop_btn = ttk.Button(top_frame, text="一键停止", command=self.stop_all_speakers, state=tk.DISABLED)
         self.stop_btn.grid(row=0, column=9, padx=10)
 
         # 定时工作时长与延迟设定区
@@ -108,11 +108,11 @@ class LabviewMimicGUI:
 
         ttk.Separator(top_frame, orient=tk.HORIZONTAL).grid(row=2, column=0, columnspan=10, sticky="ew", pady=5)
         
-        # 🌟 核心修改 2：展开为 3 个独立的 LUT 文件加载槽
+        # 核心修改 2：展开为 3 个独立的 LUT 文件加载槽
         for b in range(3):
             ttk.Label(top_frame, text=f"板{b+1} 定标:").grid(row=3+b, column=0, padx=5, pady=2, sticky='e')
             ttk.Entry(top_frame, textvariable=self.calib_vars[b], width=55, state="readonly").grid(row=3+b, column=1, columnspan=5, padx=5, sticky='w')
-            ttk.Button(top_frame, text=f"📂 加载 板{b+1} 定标数据", command=lambda idx=b: self.load_calibration_file(idx)).grid(row=3+b, column=6, columnspan=2, padx=5, sticky='w')
+            ttk.Button(top_frame, text=f"加载 板{b+1} 定标数据", command=lambda idx=b: self.load_calibration_file(idx)).grid(row=3+b, column=6, columnspan=2, padx=5, sticky='w')
 
         self.use_calib_var = tk.BooleanVar(value=True)
         self.use_calib_chk = ttk.Checkbutton(top_frame, text="全局启用定标补正", variable=self.use_calib_var, command=self.save_hardware_config)
@@ -123,7 +123,7 @@ class LabviewMimicGUI:
         # 同步轮播、喇叭数量与曝光控制
         ttk.Label(top_frame, text="自动定标系统").grid(row=7, column=0, padx=5, pady=5, sticky='e')
         
-        # 🌟 增加定标喇叭数量输入框 (默认 8 通道)
+        # 增加定标喇叭数量输入框 (默认 8 通道)
         self.cal_spk_num_var = tk.IntVar(value=8)
         ttk.Label(top_frame, text="定标喇叭数:").grid(row=7, column=1, sticky='e')
         ttk.Entry(top_frame, textvariable=self.cal_spk_num_var, width=6, justify="center").grid(row=7, column=2, sticky='w', padx=(2, 15))
@@ -155,30 +155,30 @@ class LabviewMimicGUI:
         self.save_dir_var = tk.StringVar()
         ttk.Entry(top_frame, textvariable=self.save_dir_var, width=55, state="readonly").grid(row=9, column=1, columnspan=5, padx=5, sticky='w')
         
-        self.save_dir_btn = ttk.Button(top_frame, text="📂 浏览目录", command=self.browse_save_dir)
+        self.save_dir_btn = ttk.Button(top_frame, text="浏览目录", command=self.browse_save_dir)
         self.save_dir_btn.grid(row=9, column=4, padx=5, sticky='w')
         
         # 缩小单张采集的占位，留出空间
-        self.snap_btn = ttk.Button(top_frame, text="📸 采集单张", command=self.capture_single_frame)
+        self.snap_btn = ttk.Button(top_frame, text="采集单张", command=self.capture_single_frame)
         self.snap_btn.grid(row=9, column=6, padx=5, sticky='w')
 
-        # 🌟 新增：拍摄时长设置 与 序列采集按钮
+        # 新增：拍摄时长设置 与 序列采集按钮
         ttk.Label(top_frame, text="序列时长(s):").grid(row=9, column=7, sticky='e')
         self.cam_dur_var = tk.DoubleVar(value=2.0)
         ttk.Entry(top_frame, textvariable=self.cam_dur_var, width=5).grid(row=9, column=8, sticky='w')
         
-        self.seq_btn = ttk.Button(top_frame, text="📸 采集序列", command=self.capture_image_sequence)
+        self.seq_btn = ttk.Button(top_frame, text="采集序列", command=self.capture_image_sequence)
         self.seq_btn.grid(row=9, column=9, padx=5, sticky='w')
 
-        # 🌟 新增 row=10：官方相机配置文件加载与硬件级矫正使能开关
+        # 新增 row=10：官方相机配置文件加载与硬件级矫正使能开关
         ttk.Label(top_frame, text="相机配置文件:").grid(row=10, column=0, padx=5, pady=5, sticky='e')
         ttk.Entry(top_frame, textvariable=self.cam_config_var, width=55, state="readonly").grid(row=10, column=1, columnspan=3, padx=5, sticky='w')
-        ttk.Button(top_frame, text="📂 加载配置", command=self.load_camera_config_file).grid(row=10, column=4, padx=5, sticky='w')
+        ttk.Button(top_frame, text="加载配置", command=self.load_camera_config_file).grid(row=10, column=4, padx=5, sticky='w')
         
         ttk.Checkbutton(top_frame, text="启用镜头失真矫正", variable=self.use_undistort_var, command=self.apply_camera_corrections).grid(row=10, column=6, columnspan=2, padx=10, sticky='w')
         ttk.Checkbutton(top_frame, text="启用平场矫正", variable=self.use_ffc_var, command=self.apply_camera_corrections).grid(row=10, column=8, columnspan=2, padx=10, sticky='w')
 
-        # 🌟 新增 row=11：偶极子/四极子多极波场旋转控制
+        # 新增 row=11：偶极子/四极子多极波场旋转控制
         ttk.Label(top_frame, text="旋转多极波场:").grid(row=11, column=0, padx=5, pady=5, sticky='e')
         
         m_frame = ttk.Frame(top_frame)
@@ -208,7 +208,7 @@ class LabviewMimicGUI:
         self.log("界面初始化完成。请先连接串口与相机。")
 
     def generate_multipole_wavefield(self):
-        """🌟 新增：一键生成偶极子/四极子及其旋转波场阵列参数"""
+        """一键生成偶极子/四极子及其旋转波场阵列参数"""
         try:
             # 1. 强制切换到 24 通道模式并重建参数矩阵界面，确保 24 个输入框全部可见并接受写入
             if "24通道" not in self.board_var.get():
@@ -263,7 +263,7 @@ class LabviewMimicGUI:
                             phase_rad = -2 * angle
                             
                     if omega_eff <= 0:
-                        self.log(f"⚠️ 通道 CH{i+1} 的有效频率过低或为负，已将该通道静音。请减小旋转速度！")
+                        self.log(f"通道 CH{i+1} 的有效频率过低或为负，已将该通道静音。请减小旋转速度！")
                         amp = 0.0
                         period_ms = T_ms
                         phase = 0.0
@@ -284,10 +284,10 @@ class LabviewMimicGUI:
                 self.phase_vars[i].set(round(phase, 4))
                 self.period_vars[i].set(int(period_ms))
                 
-            self.log(f"✅ 【{wave_type}】(旋转角速度: {omega_1} rad/s) 24通道波场参数已成功生成并填入面板！可以点击下方执行输出。")
+            self.log(f"【{wave_type}】(旋转角速度: {omega_1} rad/s) 24通道波场参数已成功生成并填入面板！可以点击下方执行输出。")
             
         except Exception as e:
-            self.log(f"❌ 波场参数计算出现异常: {e}")
+            self.log(f"波场参数计算出现异常: {e}")
             messagebox.showerror("生成失败", f"请检查输入参数是否合法！\n{e}")
 
     def build_param_matrix(self):
@@ -355,18 +355,18 @@ class LabviewMimicGUI:
             current = self.port_var.get()
             if current in port_list: self.port_cb.set(current)
             else: self.port_cb.set(port_list[0])
-            self.log(f"🔄 刷新串口列表: 找到 {len(port_list)} 个设备 ({', '.join(port_list)})")
+            self.log(f"刷新串口列表: 找到 {len(port_list)} 个设备 ({', '.join(port_list)})")
         else:
             self.port_cb['values'] = ["无可用串口"]
             self.port_cb.set("无可用串口")
-            self.log("🔄 刷新串口列表: 未检测到设备，请检查 USB 连接。")
+            self.log("刷新串口列表: 未检测到设备，请检查 USB 连接。")
 
     def browse_save_dir(self):
         dir_path = filedialog.askdirectory(title="选择图像与定标数据保存主目录")
         if dir_path:
             self.save_dir_var.set(dir_path)
             self.save_hardware_config()
-            self.log(f"📁 图像保存主目录已更新为: {dir_path}")
+            self.log(f"图像保存主目录已更新为: {dir_path}")
 
     def capture_single_frame(self):
         if not self.camera or not self.camera.is_opened:
@@ -411,15 +411,15 @@ class LabviewMimicGUI:
             
             if is_success:
                 im_buf.tofile(filename) 
-                self.log(f"📸 [单帧快照] 采集成功！无损 TIFF 已保存至:\n{filename}")
+                self.log(f"[单帧快照] 采集成功！无损 TIFF 已保存至:\n{filename}")
             else:
-                self.log(f"❌ 编码单张图片失败")
+                self.log(f"编码单张图片失败")
                 
         except Exception as e:
-            self.log(f"❌ 采集单张图片异常: {e}")
+            self.log(f"采集单张图片异常: {e}")
 
     def capture_image_sequence(self):
-        """🌟 新增：图片序列采集功能"""
+        """新增：图片序列采集功能"""
         if not self.camera or not self.camera.is_opened:
             messagebox.showerror("错误", "请先连接并打开工业相机！")
             return
@@ -449,7 +449,7 @@ class LabviewMimicGUI:
             os.makedirs(seq_dir, exist_ok=True)
             
             expected_frames = int(target_fps * duration_sec)
-            self.log(f"⏳ 开始采集图像序列: 时长 {duration_sec}s, 帧率 {target_fps}FPS (预计约 {expected_frames} 帧)")
+            self.log(f"开始采集图像序列: 时长 {duration_sec}s, 帧率 {target_fps}FPS (预计约 {expected_frames} 帧)")
             self.root.update()
             
             # 4. 调用 camera_controller.py 原有的录制接口
@@ -461,20 +461,20 @@ class LabviewMimicGUI:
                 time.sleep(0.05)
                 
             # 6. 调用原有的落盘接口，将图片写入刚新建的文件夹
-            self.log(f"💾 抓取结束，正在将数据落盘至: Sequence_{timestamp} ...")
+            self.log(f"抓取结束，正在将数据落盘至: Sequence_{timestamp} ...")
             self.root.update()
             self.camera.wait_and_save(save_dir=seq_dir, prefix="frame")
             
-            self.log(f"✅ 图片序列采集并落盘成功！文件夹名: Sequence_{timestamp}")
+            self.log(f"图片序列采集并落盘成功！文件夹名: Sequence_{timestamp}")
             messagebox.showinfo("采集成功", f"成功保存图像序列！\n共计保存: {len(self.camera.frame_cache)} 帧\n保存位置:\n{seq_dir}")
             
         except Exception as e:
-            self.log(f"❌ 采集图片序列异常: {e}")
+            self.log(f"采集图片序列异常: {e}")
             messagebox.showerror("采集失败", f"采集过程出错:\n{str(e)}")
 
     def toggle_camera(self):
         if MindVisionCamera is None:
-            self.log("❌ 错误：找不到 camera_controller.py 或者 mvsdk.py！")
+            self.log("错误：找不到 camera_controller.py 或者 mvsdk.py！")
             return
             
         if self.camera is None or not self.camera.is_opened:
@@ -482,49 +482,49 @@ class LabviewMimicGUI:
                 self.log("正在尝试连接迈德威视工业相机...")
                 self.camera = MindVisionCamera()
                 self.camera.open_camera()
-                self.connect_cam_btn.config(text="📸断开相机")
-                self.log("✅ 相机连接成功并已启动数据流！")
+                self.connect_cam_btn.config(text="断开相机")
+                self.log("相机连接成功并已启动数据流！")
                 
-                # 🌟 新增：连接成功后，自动将界面上的配置文件路径及矫正开关注入相机硬件
+                # 新增：连接成功后，自动将界面上的配置文件路径及矫正开关注入相机硬件
                 self.apply_camera_corrections()
                 
             except Exception as e:
-                self.log(f"❌ 相机连接失败: {e}")
+                self.log(f"相机连接失败: {e}")
                 self.camera = None
         else:
             self.camera.close_camera()
-            self.connect_cam_btn.config(text="📸连接相机")
-            self.log("🔌 相机已安全断开。")
+            self.connect_cam_btn.config(text="连接相机")
+            self.log("相机已安全断开。")
 
     def toggle_connection(self):
         if self.controller is None:
             port = self.port_var.get().strip()
             if port == "无可用串口" or not port:
-                self.log("❌ 请先选择一个有效的串口！")
+                self.log("请先选择一个有效的串口！")
                 return
             self.log(f"正在尝试连接 {port}...")
             self.controller = SpeakerArrayController(port=port)
             if self.controller.ser and self.controller.ser.is_open:
-                self.connect_btn.config(text="🔌断开串口")
+                self.connect_btn.config(text="断开串口")
                 self.execute_btn.config(state=tk.NORMAL)
                 self.stop_btn.config(state=tk.NORMAL) 
                 self.carousel_btn.config(state=tk.NORMAL) 
-                self.log(f"✅ 成功连接到 {port}")
+                self.log(f"成功连接到 {port}")
                 self.save_hardware_config() 
                 self.controller.calibration_data = None 
             else:
                 self.controller = None
-                self.log(f"❌ 连接失败。")
+                self.log(f"连接失败。")
         else:
             self.controller.close()
             self.controller = None
-            self.connect_btn.config(text="🔌连接串口")
+            self.connect_btn.config(text="连接串口")
             self.execute_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.DISABLED)
             self.carousel_btn.config(state=tk.DISABLED)
-            self.log("🔌 串口已断开。")
+            self.log("串口已断开。")
 
-    # 🌟 核心修改 3：独立的 LUT 文件导入逻辑
+    # 核心修改 3：独立的 LUT 文件导入逻辑
     def load_calibration_file(self, idx):
         file_path = filedialog.askopenfilename(title=f"选择 板{idx+1} 的 LUT 定标 JSON 文件", filetypes=[("JSON Files", "*.json")])
         if file_path:
@@ -533,10 +533,10 @@ class LabviewMimicGUI:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     self.lut_data_list[idx] = json.load(f)
-                self.log(f"✅ 板{idx+1} 的 LUT 独立定标曲线已载入内存！")
+                self.log(f"板{idx+1} 的 LUT 独立定标曲线已载入内存！")
                 if self.controller: self.controller.calibration_data = None
             except Exception as e:
-                self.log(f"❌ 板{idx+1} LUT 解析失败: {e}")
+                self.log(f"板{idx+1} LUT 解析失败: {e}")
 
     def save_hardware_config(self):
         self.config.update({
@@ -624,7 +624,7 @@ class LabviewMimicGUI:
         except Exception as e:
             self.log(f"执行出错: {str(e)}")
 
-    # 🌟 核心修复：精确对口且【全局跨板锚定】的 LUT 映射引擎
+    # 核心修复：精确对口且【全局跨板锚定】的 LUT 映射引擎
     def _apply_lut_calibration(self, params, board_idx):
         if not self.use_calib_var.get(): return params 
         
@@ -655,7 +655,7 @@ class LabviewMimicGUI:
             target_amp_mm = p['amp'] * absolute_global_max
             req_v = np.interp(target_amp_mm, amp_out_arr, v_in_arr) 
 
-            # 🌟 核心修改：彻底废除相位补偿逻辑！直接让最终下发相位等于用户输入的原始目标相位！
+            # 核心修改：彻底废除相位补偿逻辑！直接让最终下发相位等于用户输入的原始目标相位！
             final_phase = p['phase'] % 1.0
 
             calibrated.append({"amp": req_v, "phase": final_phase, "period": p['period']})
@@ -670,7 +670,7 @@ class LabviewMimicGUI:
 
     def _lut_carousel_thread(self):
         if not self.camera or not self.camera.is_opened:
-            self.root.after(0, self.log, "❌ 错误：尚未连接工业相机！请先点击上方【连接相机】按钮。")
+            self.root.after(0, self.log, "错误：尚未连接工业相机！请先点击上方【连接相机】按钮。")
             self._cancel_flag = True
             return
 
@@ -680,12 +680,12 @@ class LabviewMimicGUI:
 
         num_speakers = self.cal_spk_num_var.get()
         if num_speakers < 1 or num_speakers > 24:
-            self.root.after(0, self.log, "❌ 错误：定标喇叭数量必须设置在 1 ~ 24 之间！")
+            self.root.after(0, self.log, "错误：定标喇叭数量必须设置在 1 ~ 24 之间！")
             return
 
         self.root.after(0, self.log, "\n" + "="*50)
-        self.root.after(0, self.log, f"🎬 开始执行【纯振幅】全局自动化声光同步定标！目标总喇叭数: {num_speakers} 个")
-        self.root.after(0, self.log, "👉 核心卡点时序: 0.0s起振 -> 0.33s拍摄 -> 1.75s停震 -> 5.0s冷却落盘")
+        self.root.after(0, self.log, f"开始执行【纯振幅】全局自动化声光同步定标！目标总喇叭数: {num_speakers} 个")
+        self.root.after(0, self.log, "核心卡点时序: 0.0s起振 -> 0.33s拍摄 -> 1.75s停震 -> 5.0s冷却落盘")
         self.root.after(0, self.log, "="*50)
         
         backup_calib = self.controller.calibration_data
@@ -715,9 +715,9 @@ class LabviewMimicGUI:
                     folder_name = f"CH{global_ch+1}_Amp{lvl:.1f}"
                     save_dir = os.path.join(base_dir, folder_name)
                     
-                    self.root.after(0, self.log, f"🔊 [{folder_name}] 硬件板{board_id} CH{local_ch+1} 纯净打靶激发中...")
+                    self.root.after(0, self.log, f"[{folder_name}] 硬件板{board_id} CH{local_ch+1} 纯净打靶激发中...")
 
-                    # 🌟 核心修改：彻底取消参考锚点，测哪路哪路发波，其余全部闭嘴，消灭所有空间声场干涉！
+                    # 核心修改：彻底取消参考锚点，测哪路哪路发波，其余全部闭嘴，消灭所有空间声场干涉！
                     step_params = []
                     for i in range(8):
                         if i == local_ch:
@@ -748,7 +748,7 @@ class LabviewMimicGUI:
                         time.sleep(0.01)
                     
                     if self._cancel_flag: break
-                    self.root.after(0, self.log, f"⏳ 进入 5s 恢复冷却...")
+                    self.root.after(0, self.log, f"进入 5s 恢复冷却...")
 
                     save_start = time.perf_counter()
                     self.camera.wait_and_save(save_dir, prefix=folder_name)
@@ -759,12 +759,12 @@ class LabviewMimicGUI:
                         time.sleep(remain)
 
             if not self._cancel_flag:
-                self.root.after(0, self.log, f"✅ 全通道纯振幅定标轮播完毕！\n📁 数据保存在:\n{base_dir}")
+                self.root.after(0, self.log, f"全通道纯振幅定标轮播完毕！\n数据保存在:\n{base_dir}")
             
             for b in [1, 2, 3]: self.controller.stop_all(b)
 
         except Exception as e:
-            self.root.after(0, self.log, f"⛔ 同步轮播异常: {e}")
+            self.root.after(0, self.log, f"同步轮播异常: {e}")
         finally:
             self.controller.calibration_data = backup_calib
 
@@ -778,7 +778,7 @@ class LabviewMimicGUI:
         if self._cancel_flag: return
         
         try:
-            # 🌟 核心修改 5：延时执行时也将参数严格切片，并分别进行独立 LUT 映射
+            # 核心修改 5：延时执行时也将参数严格切片，并分别进行独立 LUT 映射
             if "24通道" in mode:
                 cal_1 = self._apply_lut_calibration(params[0:8], board_idx=1)
                 cal_2 = self._apply_lut_calibration(params[8:16], board_idx=2)
@@ -786,7 +786,7 @@ class LabviewMimicGUI:
                 self.controller.write_waveform_params(1, cal_1)
                 self.controller.write_waveform_params(2, cal_2)
                 self.controller.write_waveform_params(3, cal_3)
-                self.root.after(0, self.log, "⏳ 定时参数已下发 (24通道，独立查表映射后)。")
+                self.root.after(0, self.log, "定时参数已下发 (24通道，独立查表映射后)。")
             else:
                 b_id = self._get_board_id(mode) or 0
                 lut_idx = b_id if b_id in [1, 2, 3] else 1
@@ -903,7 +903,7 @@ class LabviewMimicGUI:
             self.log(traceback.format_exc())
     
     def load_camera_config_file(self):
-        """🌟 新增：选择迈德威视官方导出的相机配置文件 (.config / .txt)"""
+        """新增：选择迈德威视官方导出的相机配置文件 (.config / .txt)"""
         file_path = filedialog.askopenfilename(
             title="选择官方相机参数配置文件", 
             filetypes=[("Camera Config Files", "*.config *.txt"), ("All Files", "*.*")]
@@ -911,12 +911,12 @@ class LabviewMimicGUI:
         if file_path:
             self.cam_config_var.set(file_path)
             self.save_hardware_config()
-            self.log(f"✅ 成功读取官方相机配置文件路径:\n{file_path}")
+            self.log(f"成功读取官方相机配置文件路径:\n{file_path}")
             # 实时同步至相机底层
             self.apply_camera_corrections()
 
     def apply_camera_corrections(self):
-        """🌟 新增：收集 GUI 状态，统一路由并下发硬件矫正控制"""
+        """新增：收集 GUI 状态，统一路由并下发硬件矫正控制"""
         self.save_hardware_config()
         if self.camera and self.camera.is_opened:
             cfg_path = self.cam_config_var.get().strip()
@@ -929,7 +929,7 @@ class LabviewMimicGUI:
                 use_undistort=undistort_active,
                 use_ffc=ffc_active
             )
-            self.log(f"🛰️ 硬件状态同步：加载参数文件={bool(cfg_path)} | 畸变矫正={undistort_active} | 平场矫正={ffc_active}")
+            self.log(f"硬件状态同步：加载参数文件={bool(cfg_path)} | 畸变矫正={undistort_active} | 平场矫正={ffc_active}")
 
 if __name__ == "__main__":
     root = tk.Tk()
