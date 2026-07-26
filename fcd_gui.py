@@ -4,6 +4,7 @@ import traceback
 import json
 import os
 from backend import FCDCore
+from config import AppConfig
 
 class FCDApp:
     def __init__(self, root):
@@ -11,7 +12,7 @@ class FCDApp:
         self.root.title("FCD水波波场分析系统")
         self.root.geometry("820x800") # 稍微把窗口高度加一点点，从 720 改为 800
         
-        self.config_file = os.path.join(os.path.dirname(__file__), "fcd_path_cache.json")
+        self.config = AppConfig("fcd_path_cache.json")
         
         # ===== 修改后：喇叭定标系统参数变量 =====
         self.cal_dir = tk.StringVar(value="")      # 独立定标图像路径
@@ -184,28 +185,20 @@ class FCDApp:
             print(f"后台运行中，界面已关闭: {message}")
 
     def save_path_config(self):
-        # 将界面上存在的所有状态、路径、文本框数值、复选框统统打包
-        config_data = {
-            # 1. 核心路径
+        self.config.update({
             "ref_path": getattr(self, 'ref_var', getattr(self, 'ref_path', None)).get() if hasattr(self, 'ref_var') or hasattr(self, 'ref_path') else "",
             "def_path": getattr(self, 'def_var', getattr(self, 'def_path', None)).get() if hasattr(self, 'def_var') or hasattr(self, 'def_path') else "",
             "seq_dir": getattr(self, 'seq_var', getattr(self, 'seq_dir', None)).get() if hasattr(self, 'seq_var') or hasattr(self, 'seq_dir') else "",
             "out_dir": getattr(self, 'out_var', getattr(self, 'out_dir', None)).get() if hasattr(self, 'out_var') or hasattr(self, 'out_dir') else "",
-            
-            # 2. 定标专用参数
             "cal_dir": self.cal_dir.get(),
             "cal_fps": self.cal_fps.get(),
             "cal_period": self.cal_period.get(),
-            
-            # 3. 基础物理与裁剪参数
             "water_depth": self.water_depth_var.get(),
             "seq_fps": self.seq_fps_var.get(),
             "crop_x1": self.crop_x1.get(),
             "crop_x2": self.crop_x2.get(),
             "crop_y1": self.crop_y1.get(),
             "crop_y2": self.crop_y2.get(),
-            
-            # 4. 高级微调面板参数
             "adv_low_pass": self.adv_low_pass.get(),
             "adv_krad": self.adv_krad.get(),
             "adv_edge": self.adv_edge.get(),
@@ -213,10 +206,8 @@ class FCDApp:
             "adv_p_high": self.adv_p_high.get(),
             "adv_qstep": self.adv_qstep.get(),
             "adv_qscale": self.adv_qscale.get(),
-            "adv_dstep": self.adv_dstep.get(),    # 🌟 新增保存
-            "adv_dscale": self.adv_dscale.get(),  # 🌟 新增保存
-            
-            # 5. 序列导出项 9个开关复选框
+            "adv_dstep": self.adv_dstep.get(),
+            "adv_dscale": self.adv_dscale.get(),
             "chk_hf": self.chk_hf.get(),
             "chk_disp": self.chk_disp.get(),
             "chk_sz": self.chk_sz.get(),
@@ -225,65 +216,46 @@ class FCDApp:
             "chk_s3d": self.chk_s3d.get(),
             "chk_ph": self.chk_ph.get(),
             "chk_pa": self.chk_pa.get(),
-            "chk_mom": self.chk_mom.get()
-        }
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=4)
-            self.log("✅ 全部配置已成功保存！下次启动将自动恢复。")
-        except Exception as e:
-            self.log(f"❌ 保存配置失败: {e}")
+            "chk_mom": self.chk_mom.get(),
+        })
+        self.config.save()
+        self.log("全部配置已成功保存！下次启动将自动恢复。")
 
     def load_path_config(self):
-        try:
-            cfg = {}
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    cfg = json.load(f)
-                
-            # 1. 核心路径恢复
-            if "ref_path" in cfg and hasattr(self, 'ref_var'): self.ref_var.set(cfg["ref_path"])
-            if "def_path" in cfg and hasattr(self, 'def_var'): self.def_var.set(cfg["def_path"])
-            if "seq_dir" in cfg and hasattr(self, 'seq_var'): self.seq_var.set(cfg["seq_dir"])
-            if "out_dir" in cfg and hasattr(self, 'out_var'): self.out_var.set(cfg["out_dir"])
-            
-            # 2. 定标专用参数恢复
-            self.cal_dir.set(cfg.get("cal_dir", ""))
-            self.cal_fps.set(cfg.get("cal_fps", 30.0))
-            self.cal_period.set(cfg.get("cal_period", 150.0))
-            
-            # 3. 基础参数与裁剪恢复
-            self.water_depth_var.set(cfg.get("water_depth", "30.0"))
-            self.seq_fps_var.set(cfg.get("seq_fps", "30.0"))
-            self._set_entry_val(self.crop_x1, cfg.get("crop_x1", "0"))
-            self._set_entry_val(self.crop_x2, cfg.get("crop_x2", "0"))
-            self._set_entry_val(self.crop_y1, cfg.get("crop_y1", "0"))
-            self._set_entry_val(self.crop_y2, cfg.get("crop_y2", "0"))
-            
-            # 4. 高级参数面板恢复（即使没有缓存，也会利用 get 的机制填入最合理的默认值，防止输入框留白）
-            self._set_entry_val(self.adv_low_pass, cfg.get("adv_low_pass", "65.0"))
-            self._set_entry_val(self.adv_krad, cfg.get("adv_krad", "0.28"))
-            self._set_entry_val(self.adv_edge, cfg.get("adv_edge", "10"))
-            self._set_entry_val(self.adv_p_low, cfg.get("adv_p_low", "2.0"))
-            self._set_entry_val(self.adv_p_high, cfg.get("adv_p_high", "98.0"))
-            self._set_entry_val(self.adv_qstep, cfg.get("adv_qstep", "6"))
-            self._set_entry_val(self.adv_qscale, cfg.get("adv_qscale", "4.0"))
-            self._set_entry_val(self.adv_dstep, cfg.get("adv_dstep", "8"))     # 🌟 新增恢复 (默认步距 8)
-            self._set_entry_val(self.adv_dscale, cfg.get("adv_dscale", "4.0"))# 🌟 新增恢复 (默认缩放 4.0)
-            
-            # 5. 序列导出项的开关恢复
-            if "chk_hf" in cfg: self.chk_hf.set(cfg["chk_hf"])
-            if "chk_disp" in cfg: self.chk_disp.set(cfg["chk_disp"])
-            if "chk_sz" in cfg: self.chk_sz.set(cfg["chk_sz"])
-            if "chk_amp" in cfg: self.chk_amp.set(cfg["chk_amp"])
-            if "chk_ndisp" in cfg: self.chk_ndisp.set(cfg["chk_ndisp"])
-            if "chk_s3d" in cfg: self.chk_s3d.set(cfg["chk_s3d"])
-            if "chk_ph" in cfg: self.chk_ph.set(cfg["chk_ph"])
-            if "chk_pa" in cfg: self.chk_pa.set(cfg["chk_pa"])
-            if "chk_mom" in cfg: self.chk_mom.set(cfg["chk_mom"])
-            
-        except Exception as e:
-            print(f"⚠️ 缓存配置读取异常: {e}")
+        cfg = self.config
+        if hasattr(self, 'ref_var'): self.ref_var.set(cfg.get("ref_path", ""))
+        if hasattr(self, 'def_var'): self.def_var.set(cfg.get("def_path", ""))
+        if hasattr(self, 'seq_var'): self.seq_var.set(cfg.get("seq_dir", ""))
+        if hasattr(self, 'out_var'): self.out_var.set(cfg.get("out_dir", ""))
+
+        self.cal_dir.set(cfg.get("cal_dir", ""))
+        self.cal_fps.set(cfg.get("cal_fps", 30.0))
+        self.cal_period.set(cfg.get("cal_period", 150.0))
+        self.water_depth_var.set(cfg.get("water_depth", "30.0"))
+        self.seq_fps_var.set(cfg.get("seq_fps", "30.0"))
+        self._set_entry_val(self.crop_x1, cfg.get("crop_x1", "0"))
+        self._set_entry_val(self.crop_x2, cfg.get("crop_x2", "0"))
+        self._set_entry_val(self.crop_y1, cfg.get("crop_y1", "0"))
+        self._set_entry_val(self.crop_y2, cfg.get("crop_y2", "0"))
+        self._set_entry_val(self.adv_low_pass, cfg.get("adv_low_pass", "65.0"))
+        self._set_entry_val(self.adv_krad, cfg.get("adv_krad", "0.28"))
+        self._set_entry_val(self.adv_edge, cfg.get("adv_edge", "10"))
+        self._set_entry_val(self.adv_p_low, cfg.get("adv_p_low", "2.0"))
+        self._set_entry_val(self.adv_p_high, cfg.get("adv_p_high", "98.0"))
+        self._set_entry_val(self.adv_qstep, cfg.get("adv_qstep", "6"))
+        self._set_entry_val(self.adv_qscale, cfg.get("adv_qscale", "4.0"))
+        self._set_entry_val(self.adv_dstep, cfg.get("adv_dstep", "8"))
+        self._set_entry_val(self.adv_dscale, cfg.get("adv_dscale", "4.0"))
+
+        self.chk_hf.set(cfg.get("chk_hf", True))
+        self.chk_disp.set(cfg.get("chk_disp", True))
+        self.chk_sz.set(cfg.get("chk_sz", True))
+        self.chk_amp.set(cfg.get("chk_amp", True))
+        self.chk_ndisp.set(cfg.get("chk_ndisp", True))
+        self.chk_s3d.set(cfg.get("chk_s3d", True))
+        self.chk_ph.set(cfg.get("chk_ph", True))
+        self.chk_pa.set(cfg.get("chk_pa", True))
+        self.chk_mom.set(cfg.get("chk_mom", True))
 
     def _get_core(self):
         def safe_int(v, default=0):

@@ -19,6 +19,8 @@ try:
 except ImportError:
     MindVisionCamera = None
 
+from config import AppConfig
+
 class LabviewMimicGUI:
     def __init__(self, root):
         self.root = root
@@ -27,7 +29,7 @@ class LabviewMimicGUI:
         
         self.controller = None
         self.camera = None 
-        self.config_file = os.path.join(os.path.dirname(__file__), "hardware_param_cache.json")
+        self.config = AppConfig("hardware_param_cache.json")
         
         # 🌟 核心修改 1：为 3 块板子分配独立的 LUT 内存和路径变量
         self.calib_vars = [tk.StringVar() for _ in range(3)]
@@ -537,7 +539,7 @@ class LabviewMimicGUI:
                 self.log(f"❌ 板{idx+1} LUT 解析失败: {e}")
 
     def save_hardware_config(self):
-        config_data = {
+        self.config.update({
             "calib_path_1": self.calib_vars[0].get(),
             "calib_path_2": self.calib_vars[1].get(),
             "calib_path_3": self.calib_vars[2].get(),
@@ -546,66 +548,56 @@ class LabviewMimicGUI:
             "duration": self.duration_var.get(),
             "use_calibration": self.use_calib_var.get(),
             "cam_fps": self.cam_fps_var.get(),
-            "cam_exp": self.cam_exp_var.get(), 
-            "cam_dur": getattr(self, 'cam_dur_var', tk.DoubleVar(value=2.0)).get(), # 🌟 新增保存序列时长
+            "cam_exp": self.cam_exp_var.get(),
+            "cam_dur": getattr(self, 'cam_dur_var', tk.DoubleVar(value=2.0)).get(),
             "multipole_type": getattr(self, 'multipole_type_var', tk.StringVar(value="偶极子")).get(),
             "multipole_period": getattr(self, 'multipole_period_var', tk.IntVar(value=150)).get(),
             "multipole_omega1": getattr(self, 'multipole_omega1_var', tk.DoubleVar(value=0.0)).get(),
             "global_period": self.global_period_var.get(),
             "global_phase": self.global_phase_var.get(),
             "save_dir": self.save_dir_var.get(),
-            "target_board": self.board_var.get(), 
+            "target_board": self.board_var.get(),
             "cam_config_file": self.cam_config_var.get(),
             "use_undistort": self.use_undistort_var.get(),
-            "use_ffc": self.use_ffc_var.get()
-        }
-        try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=4)
-        except Exception: pass
+            "use_ffc": self.use_ffc_var.get(),
+        })
+        self.config.save()
 
     def load_hardware_config(self):
-        if not os.path.exists(self.config_file): return
-        try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            
-            # 恢复三个 LUT 文件路径
-            for i in range(3):
-                path = cfg.get(f"calib_path_{i+1}", "")
-                if path and os.path.exists(path):
-                    self.calib_vars[i].set(path)
-                    with open(path, 'r', encoding='utf-8') as json_f:
-                        self.lut_data_list[i] = json.load(json_f)
-                    self.log(f"📂 自动检索到 板{i+1} LUT定标文件:\n{path}")
+        cfg = self.config
+        for i in range(3):
+            path = cfg.get(f"calib_path_{i+1}", "")
+            if path and os.path.exists(path):
+                self.calib_vars[i].set(path)
+                with open(path, 'r', encoding='utf-8') as json_f:
+                    self.lut_data_list[i] = json.load(json_f)
+                self.log(f"自动检索到 板{i+1} LUT定标文件:\n{path}")
 
-            if "com_port" in cfg: self.port_var.set(cfg.get("com_port", "COM6"))
-            if "delay" in cfg: self.delay_var.set(cfg.get("delay", 0.0))
-            if "duration" in cfg: self.duration_var.set(cfg.get("duration", 0.0))
-            if "use_calibration" in cfg: self.use_calib_var.set(cfg.get("use_calibration", True)) 
-            if "cam_fps" in cfg: self.cam_fps_var.set(cfg.get("cam_fps", 30.0))
-            if "cam_exp" in cfg: self.cam_exp_var.set(cfg.get("cam_exp", 10.0))
-            if "cam_dur" in cfg and hasattr(self, 'cam_dur_var'): self.cam_dur_var.set(cfg.get("cam_dur", 2.0)) # 🌟 恢复序列时长
-            if "multipole_type" in cfg and hasattr(self, 'multipole_type_var'): self.multipole_type_var.set(cfg.get("multipole_type", "偶极子"))
-            if "multipole_period" in cfg and hasattr(self, 'multipole_period_var'): self.multipole_period_var.set(cfg.get("multipole_period", 150))
-            if "multipole_omega1" in cfg and hasattr(self, 'multipole_omega1_var'): self.multipole_omega1_var.set(cfg.get("multipole_omega1", 0.0))
-            if "global_period" in cfg: self.global_period_var.set(cfg.get("global_period", 150))
-            if "global_phase" in cfg: self.global_phase_var.set(cfg.get("global_phase", 0.0))
-            if "cam_config_file" in cfg:
-                p = cfg.get("cam_config_file", "")
-                if os.path.exists(p): self.cam_config_var.set(p)
-            if "use_undistort" in cfg: self.use_undistort_var.set(cfg.get("use_undistort", False))
-            if "use_ffc" in cfg: self.use_ffc_var.set(cfg.get("use_ffc", False))
-            
-            s_dir = cfg.get("save_dir", "")
-            if s_dir and os.path.exists(s_dir): self.save_dir_var.set(s_dir)
-            else: self.save_dir_var.set(os.path.dirname(__file__))
-            
-            if "target_board" in cfg:
-                self.board_var.set(cfg.get("target_board", "1"))
-                self.build_param_matrix()
-        except Exception as e:
-            self.log(f"⚠️ 读取硬件历史缓存异常: {e}")
+        self.port_var.set(cfg.get("com_port", "COM6"))
+        self.delay_var.set(cfg.get("delay", 0.0))
+        self.duration_var.set(cfg.get("duration", 0.0))
+        self.use_calib_var.set(cfg.get("use_calibration", True))
+        self.cam_fps_var.set(cfg.get("cam_fps", 30.0))
+        self.cam_exp_var.set(cfg.get("cam_exp", 10.0))
+        if hasattr(self, 'cam_dur_var'): self.cam_dur_var.set(cfg.get("cam_dur", 2.0))
+        if hasattr(self, 'multipole_type_var'): self.multipole_type_var.set(cfg.get("multipole_type", "偶极子"))
+        if hasattr(self, 'multipole_period_var'): self.multipole_period_var.set(cfg.get("multipole_period", 150))
+        if hasattr(self, 'multipole_omega1_var'): self.multipole_omega1_var.set(cfg.get("multipole_omega1", 0.0))
+        self.global_period_var.set(cfg.get("global_period", 150))
+        self.global_phase_var.set(cfg.get("global_phase", 0.0))
+
+        p = cfg.get("cam_config_file", "")
+        if p and os.path.exists(p): self.cam_config_var.set(p)
+
+        self.use_undistort_var.set(cfg.get("use_undistort", False))
+        self.use_ffc_var.set(cfg.get("use_ffc", False))
+
+        s_dir = cfg.get("save_dir", "")
+        if s_dir and os.path.exists(s_dir): self.save_dir_var.set(s_dir)
+        else: self.save_dir_var.set(os.path.dirname(__file__))
+
+        self.board_var.set(cfg.get("target_board", "1"))
+        self.build_param_matrix()
 
     def on_enable_toggle(self):
         if self.controller and self.controller.ser and self.controller.ser.is_open:
