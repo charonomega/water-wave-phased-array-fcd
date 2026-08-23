@@ -45,15 +45,19 @@ class FCDCore:
                  p_low=2, p_high=98,
                  out_hf=True, out_amp=True, out_ph=True, out_pa=True,
                  out_disp=True, out_ndisp=True, out_sz=True, out_s3d=True, out_mom=True,
-                 q_step=6, q_scale=4.0, disp_step=8, disp_scale=15.0):
+                 q_step=6, q_scale=4.0, disp_step=8, disp_scale=15.0,
+                 out_plots=True, out_data=True, period_ms=None):
         self.ref_path = ref_path
         self.def_path = def_path
         self.seq_dir = seq_dir
         self.out_dir = out_dir if out_dir else os.getcwd()
         self.crop = crop_pixels
 
+        self.water_depth = water_depth
         self.H = (water_depth + 0.894 * 10.0) * 0.25
         self.fps = fps
+        self.period_ms = period_ms
+        self.drive_frequency = (1000.0 / period_ms) if period_ms else None
 
         self.low_pass_suppress_r = low_pass_suppress
         self.krad_factor = krad_factor
@@ -70,6 +74,8 @@ class FCDCore:
         self.out_sz = out_sz
         self.out_s3d = out_s3d
         self.out_mom = out_mom
+        self.out_plots = out_plots
+        self.out_data = out_data
 
         self.q_step = q_step
         self.q_scale = q_scale
@@ -92,6 +98,78 @@ class FCDCore:
         with open(log_path, 'w', encoding='utf-8') as f:
             f.write(content)
         return log_path
+
+    def _save_matrix_csv(self, out_dir, name, arr, fmt='%.6g'):
+        """将二维物理场/结果矩阵保存为 CSV，用于后续离线分析。"""
+        path = os.path.join(out_dir, name)
+        np.savetxt(path, arr, delimiter=',', fmt=fmt)
+        return path
+
+    def _save_parameters_json(self, out_dir, prefix, params):
+        """将本次分析的全部输入参数与关键中间量保存为结构化 JSON。"""
+        os.makedirs(out_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(out_dir, f"{prefix}_parameters_{timestamp}.json")
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(params, f, ensure_ascii=False, indent=4)
+        return path
+
+    def _collect_parameters(self, Iref, mm_per_pixel=None):
+        """收集单帧/序列分析中影响后续分析的参数与关键中间量。"""
+        if mm_per_pixel is None:
+            mm_per_pixel = getattr(self, 'mm_per_pixel', self._estimate_mm_per_pixel(Iref))
+        self.mm_per_pixel = mm_per_pixel
+
+        rows, cols = Iref.shape
+        if not getattr(self, '_cache_valid', False) or getattr(self, '_cached_shape', None) != Iref.shape:
+            kr, ku, krad = self._find_orth_carrier_pks(Iref)
+            self.kr, self.ku, self.krad = kr, ku, krad
+        else:
+            kr, ku, krad = self.kr, self.ku, self.krad
+
+        params = {
+            "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "software": "Software_updated/FCDCore",
+            "ref_path": self.ref_path,
+            "def_path": self.def_path,
+            "seq_dir": self.seq_dir,
+            "out_dir": self.out_dir,
+            "crop_pixels": list(self.crop),
+            "water_depth_mm": self.water_depth,
+            "H_refractive_parameter": self.H,
+            "fps": self.fps,
+            "period_ms": self.period_ms,
+            "drive_frequency_hz": self.drive_frequency,
+            "low_pass_suppress_px": self.low_pass_suppress_r,
+            "krad_factor": self.krad_factor,
+            "edge_width_px": self.edge,
+            "p_low_pct": self.p_low,
+            "p_high_pct": self.p_high,
+            "q_step": self.q_step,
+            "q_scale": self.q_scale,
+            "disp_step": self.disp_step,
+            "disp_scale": self.disp_scale,
+            "out_plots": self.out_plots,
+            "out_data": self.out_data,
+            "mm_per_pixel": float(mm_per_pixel),
+            "cm_per_pixel": float(mm_per_pixel / 10.0),
+            "image_shape_after_crop_px": [int(rows), int(cols)],
+            "fov_width_mm": float(cols * mm_per_pixel),
+            "fov_height_mm": float(rows * mm_per_pixel),
+            "fov_width_cm": float(cols * mm_per_pixel / 10.0),
+            "fov_height_cm": float(rows * mm_per_pixel / 10.0),
+            "carrier_kr_px": [float(kr[0]), float(kr[1])],
+            "carrier_ku_px": [float(ku[0]), float(ku[1])],
+            "carrier_krad_px": float(krad),
+        }
+        return params
+
+    def _params_to_log(self, params):
+        """将参数字典格式化为可读的详细日志文本。"""
+        lines = ["===== 本次分析参数/环境信息 ====="]
+        for key, value in params.items():
+            lines.append(f"{key}: {value}")
+        return "\n".join(lines)
 
     def _read_and_crop(self, path):
         img_data = np.fromfile(path, dtype=np.uint8)
@@ -457,6 +535,7 @@ class FCDCore:
 
         _, water_mask, _ = self._get_smooth_occlusion_mask(Iref)
         water_mask_crop = water_mask[e:-e, e:-e]
+        self._last_water_mask = water_mask_crop
 
         h = h_t * water_mask_crop
         u = u_crop * mpp * water_mask_crop
@@ -480,10 +559,12 @@ class FCDCore:
 
         Iref = self._read_and_crop(self.ref_path)
         mm_per_pixel = self._estimate_mm_per_pixel(Iref)
+        params = self._collect_parameters(Iref, mm_per_pixel)
 
         h_t, u_t, v_t, _ = self.process_single_frame()
 
         shape = h_t.shape
+        water_mask = getattr(self, '_last_water_mask', np.ones(shape, dtype=float))
 
         def create_fig(cmap, vmin, vmax, title, label=None, is_2d=False, legend_kwargs=None):
             if is_2d:
@@ -535,24 +616,26 @@ class FCDCore:
             return fig, ax, im
 
         saved_files = []
+        data_files = []
 
         h_vmin, h_vmax = np.percentile(h_t, self.p_low), np.percentile(h_t, self.p_high)
         h_abs_max = max(abs(h_vmin), abs(h_vmax))
         h_vmin, h_vmax = -h_abs_max, h_abs_max
 
-        # 1. 单帧瞬时水位形变
-        f_h, a_h, im_h = create_fig('seismic', h_vmin, h_vmax, "单帧瞬时水位形变", "水位高度 (mm)")
-        im_h.set_data(h_t)
-        p = os.path.join(run_dir, f'hfield_{timestamp}.jpg')
-        f_h.savefig(p, dpi=150, bbox_inches='tight', pad_inches=0.02)
-        saved_files.append(p)
-
         uv_mag = np.sqrt(u_t ** 2 + v_t ** 2)
         uv_vmax = np.percentile(uv_mag, self.p_high)
         ph_norm = np.mod(np.arctan2(v_t, u_t), 2 * np.pi) / (2 * np.pi)
 
-        # 2. 三维位移场 (带双重图例)
-        if True:
+        if self.out_plots:
+            # 1. 单帧瞬时水位形变
+            f_h, a_h, im_h = create_fig('seismic', h_vmin, h_vmax, "单帧瞬时水位形变", "水位高度 (mm)")
+            im_h.set_data(h_t)
+            p = os.path.join(run_dir, f'hfield_{timestamp}.jpg')
+            f_h.savefig(p, dpi=150, bbox_inches='tight', pad_inches=0.02)
+            saved_files.append(p)
+            plt.close(f_h)
+
+            # 2. 三维位移场 (带双重图例)
             f_3d, a_3d, im_3d = create_fig('seismic', h_vmin, h_vmax, "三维位移场", label="水位高度 (mm)")
             im_3d.set_data(h_t)
 
@@ -586,47 +669,82 @@ class FCDCore:
             saved_files.append(p_3d)
             plt.close(f_3d)
 
-        # 3. 面内二维矢量位移场
-        f_d, a_d, im_d = create_fig(None, None, None, "面内二维矢量位移场 (u, v)", is_2d=True,
-                                     legend_kwargs={'mode': 'cartesian', 'max_val': uv_vmax, 'unit': 'mm',
-                                                    'label_x': '位移 u', 'label_y': '位移 v'})
+            # 3. 面内二维矢量位移场
+            f_d, a_d, im_d = create_fig(None, None, None, "面内二维矢量位移场 (u, v)", is_2d=True,
+                                         legend_kwargs={'mode': 'cartesian', 'max_val': uv_vmax, 'unit': 'mm',
+                                                        'label_x': '位移 u', 'label_y': '位移 v'})
 
-        hsv_d = np.zeros((shape[0], shape[1], 3))
-        hsv_d[..., 0] = ph_norm
-        hsv_d[..., 1] = 1.0
-        hsv_d[..., 2] = np.clip(uv_mag / (uv_vmax + 1e-10), 0, 1)
-        im_d.set_data(matplotlib.colors.hsv_to_rgb(hsv_d))
-        p = os.path.join(run_dir, f'disp_{timestamp}.jpg')
-        f_d.savefig(p, dpi=150, bbox_inches='tight', pad_inches=0.02)
-        saved_files.append(p)
+            hsv_d = np.zeros((shape[0], shape[1], 3))
+            hsv_d[..., 0] = ph_norm
+            hsv_d[..., 1] = 1.0
+            hsv_d[..., 2] = np.clip(uv_mag / (uv_vmax + 1e-10), 0, 1)
+            im_d.set_data(matplotlib.colors.hsv_to_rgb(hsv_d))
+            p = os.path.join(run_dir, f'disp_{timestamp}.jpg')
+            f_d.savefig(p, dpi=150, bbox_inches='tight', pad_inches=0.02)
+            saved_files.append(p)
+            plt.close(f_d)
 
-        # 4. 归一化位移场
-        f_dn, a_dn, im_dn = create_fig(None, None, None, "归一化位移场 (纯拓扑方向)", is_2d=True,
-                                        legend_kwargs={'mode': 'cartesian', 'max_val': 1.0, 'unit': '',
-                                                       'label_x': 'u_norm', 'label_y': 'v_norm', 'is_norm': True})
+            # 4. 归一化位移场
+            f_dn, a_dn, im_dn = create_fig(None, None, None, "归一化位移场 (纯拓扑方向)", is_2d=True,
+                                            legend_kwargs={'mode': 'cartesian', 'max_val': 1.0, 'unit': '',
+                                                           'label_x': 'u_norm', 'label_y': 'v_norm', 'is_norm': True})
 
-        hsv_dn = np.zeros((shape[0], shape[1], 3))
-        hsv_dn[..., 0] = ph_norm
-        hsv_dn[..., 1] = 1.0
-        hsv_dn[..., 2] = 1.0
-        im_dn.set_data(matplotlib.colors.hsv_to_rgb(hsv_dn))
-        p = os.path.join(run_dir, f'norm_disp_{timestamp}.jpg')
-        f_dn.savefig(p, dpi=150, bbox_inches='tight', pad_inches=0.02)
-        saved_files.append(p)
+            hsv_dn = np.zeros((shape[0], shape[1], 3))
+            hsv_dn[..., 0] = ph_norm
+            hsv_dn[..., 1] = 1.0
+            hsv_dn[..., 2] = 1.0
+            im_dn.set_data(matplotlib.colors.hsv_to_rgb(hsv_dn))
+            p = os.path.join(run_dir, f'norm_disp_{timestamp}.jpg')
+            f_dn.savefig(p, dpi=150, bbox_inches='tight', pad_inches=0.02)
+            saved_files.append(p)
+            plt.close(f_dn)
 
-        plt.close('all')
+            plt.close('all')
 
-        # 输出三大物理场绝对矩阵 CSV
-        np.savetxt(os.path.join(run_dir, f'hfield_matrix_{timestamp}.csv'), h_t, delimiter=',', fmt='%.5f')
-        np.savetxt(os.path.join(run_dir, f'disp_u_matrix_{timestamp}.csv'), u_t, delimiter=',', fmt='%.5f')
-        np.savetxt(os.path.join(run_dir, f'disp_v_matrix_{timestamp}.csv'), v_t, delimiter=',', fmt='%.5f')
+        if self.out_data:
+            # 结果图对应的结构化原始数据
+            data_files.append(self._save_matrix_csv(run_dir, f'hfield_matrix_{timestamp}.csv', h_t, fmt='%.5f'))
+            data_files.append(self._save_matrix_csv(run_dir, f'disp_u_matrix_{timestamp}.csv', u_t, fmt='%.5f'))
+            data_files.append(self._save_matrix_csv(run_dir, f'disp_v_matrix_{timestamp}.csv', v_t, fmt='%.5f'))
+            data_files.append(self._save_matrix_csv(run_dir, f'uv_mag_matrix_{timestamp}.csv', uv_mag, fmt='%.6g'))
+            data_files.append(self._save_matrix_csv(run_dir, f'disp_direction_matrix_{timestamp}.csv', ph_norm,
+                                                    fmt='%.6g'))
+
+            uv_safe = np.maximum(uv_mag, 1e-12)
+            u_norm = np.where(uv_mag > 0, u_t / uv_safe, 0.0)
+            v_norm = np.where(uv_mag > 0, v_t / uv_safe, 0.0)
+            data_files.append(self._save_matrix_csv(run_dir, f'norm_disp_u_matrix_{timestamp}.csv', u_norm,
+                                                    fmt='%.6g'))
+            data_files.append(self._save_matrix_csv(run_dir, f'norm_disp_v_matrix_{timestamp}.csv', v_norm,
+                                                    fmt='%.6g'))
+            data_files.append(self._save_matrix_csv(run_dir, f'water_mask_matrix_{timestamp}.csv', water_mask,
+                                                    fmt='%.3f'))
+            data_files.append(self._save_parameters_json(run_dir, "single", params))
+
+        h_stats = (float(np.nanmin(h_t)), float(np.nanmax(h_t)), float(np.nanmean(h_t)), float(np.nanstd(h_t)))
+        u_stats = (float(np.nanmin(u_t)), float(np.nanmax(u_t)), float(np.nanmean(u_t)), float(np.nanstd(u_t)))
+        v_stats = (float(np.nanmin(v_t)), float(np.nanmax(v_t)), float(np.nanmean(v_t)), float(np.nanstd(v_t)))
 
         log_c = (f"===== 单帧静力学与拓扑分析完成 =====\n"
                  f"静态参考图: {ref_name}\n"
                  f"动态形变图: {def_name}\n"
                  f"打包输出目录: {run_dir}\n"
-                 f"已成功导出 {len(saved_files)} 张带有标准图例的物理与拓扑图像。\n"
-                 f"已成功导出 3 份原始物理矩阵 CSV 数据 (h, u, v)。")
+                 f"{self._params_to_log(params)}\n\n"
+                 f"===== 物理场统计 ====="
+                 f"\nh (mm): min={h_stats[0]:.5g}, max={h_stats[1]:.5g}, mean={h_stats[2]:.5g}, std={h_stats[3]:.5g}"
+                 f"\nu (mm): min={u_stats[0]:.5g}, max={u_stats[1]:.5g}, mean={u_stats[2]:.5g}, std={u_stats[3]:.5g}"
+                 f"\nv (mm): min={v_stats[0]:.5g}, max={v_stats[1]:.5g}, mean={v_stats[2]:.5g}, std={v_stats[3]:.5g}"
+                 f"\n|uv| (mm): max={float(np.nanmax(uv_mag)):.5g}, p{self.p_high}={uv_vmax:.5g}"
+                 f"\n有效水区占比: {float(np.mean(water_mask)):.4f}\n\n")
+
+        if saved_files:
+            log_c += "===== 可视化图片输出 =====\n" + "\n".join(saved_files) + "\n\n"
+        else:
+            log_c += "可视化图片输出已关闭 (out_plots=False)。\n\n"
+        if data_files:
+            log_c += "===== 结构化数据输出 (CSV/JSON) =====\n" + "\n".join(data_files) + "\n"
+        else:
+            log_c += "结构化数据输出已关闭 (out_data=False)。\n"
 
         return self.write_log("SingleFrame", log_c, target_dir=run_dir)
 
@@ -636,6 +754,7 @@ class FCDCore:
         matplotlib.use('TkAgg', force=True)
 
         img = self._read_and_crop(self.ref_path)
+        mm_per_pixel = self._estimate_mm_per_pixel(img)
         img_height, img_width = img.shape[:2]
 
         fig, ax = plt.subplots(num='点击图片获取坐标')
@@ -711,7 +830,12 @@ class FCDCore:
 
         ref_name = os.path.basename(self.ref_path) if self.ref_path else "未知"
         find_dir = os.path.join(self.out_dir, "FindPixels_Results")
-        log_c = f"操作: 获取像素坐标\n静态参考图: {ref_name}\n采集点数: {len(points)}\n绝对坐标: {points}"
+        log_c = (f"操作: 获取像素坐标\n"
+                 f"静态参考图: {ref_name}\n"
+                 f"图像尺寸(px): {img_height} x {img_width}\n"
+                 f"裁剪参数: {self.crop}\n"
+                 f"像素-实际长度换算: {mm_per_pixel:.6f} mm/px = {mm_per_pixel/10.0:.6f} cm/px\n"
+                 f"采集点数: {len(points)}\n绝对坐标: {points}")
 
         return points, self.write_log("FindPixels", log_c, target_dir=find_dir)
 
@@ -871,7 +995,15 @@ class FCDCore:
 
         Iref = self._read_and_crop(self.ref_path)
         mm_per_pixel = self._estimate_mm_per_pixel(Iref)
+        params = self._collect_parameters(Iref, mm_per_pixel)
         frames = len(files)
+
+        # 计算并缓存有效水面掩膜（含遮挡结构件区域），后续 phase 等输出必须重新施加
+        _, water_mask_full, _ = self._get_smooth_occlusion_mask(Iref)
+        if self.edge > 0 and water_mask_full.shape[0] > 2 * self.edge and water_mask_full.shape[1] > 2 * self.edge:
+            water_mask_crop = water_mask_full[self.edge:-self.edge, self.edge:-self.edge]
+        else:
+            water_mask_crop = water_mask_full
 
         print("正在准备计算...")
         dummy_u = np.zeros((Iref.shape[0] - 2 * self.edge, Iref.shape[1] - 2 * self.edge))
@@ -913,6 +1045,11 @@ class FCDCore:
 
         h_stack -= bg_static
 
+        # 背景扣除后重新施加水面掩膜，避免遮挡/非水面区域产生近零噪声相位
+        h_stack *= water_mask_crop[None, :, :]
+        u_stack *= water_mask_crop[None, :, :]
+        v_stack *= water_mask_crop[None, :, :]
+
         # 提取时域标准差静态包络
         amp_map = np.std(h_stack, axis=0) * np.sqrt(2.0)
 
@@ -927,6 +1064,8 @@ class FCDCore:
         gc.collect()
 
         phase_w = np.mod(np.angle(h_ana), 2 * np.pi)
+        # 非水面区域相位无物理意义，置为 NaN，避免 0/2π 红色伪影
+        phase_w = np.where(water_mask_crop[None, :, :] > 0.5, phase_w, np.nan)
         dt = 1.0 / fps if fps > 0 else 1.0 / 30.0
 
         h_ana /= 1000.0;
@@ -1077,166 +1216,264 @@ class FCDCore:
             return fig, ax, im
 
         # 初始化标准绘图窗口
-        if self.out_hf: f_h, a_h, im_h = create_fig('seismic', h_vmin, h_vmax, "水位形变", "水位形变 (mm)")
-        if self.out_ph: f_p, a_p, im_p = create_fig('hsv', 0, 2 * np.pi, "相位角", "相位 (rad)")
-        if self.out_sz: f_sz, a_sz, im_sz = create_fig('viridis', sz_vmin, sz_vmax, "Z向自旋角动量",
-                                                        "自旋密度 ($mm^2/s$)")
-        if self.out_pa: f_pa, a_pa, im_pa = create_fig(None, None, None, "相位振幅复合场", is_2d=True,
-                                                        legend_kwargs={'mode': 'polar_rect', 'max_val': amp_vmax})
-        if self.out_disp: f_d, a_d, im_d = create_fig(None, None, None, "面内二维矢量位移场 (u, v)", is_2d=True,
-                                                       legend_kwargs={'mode': 'cartesian', 'max_val': uv_vmax,
-                                                                      'unit': 'mm', 'label_x': '位移 u',
-                                                                      'label_y': '位移 v'})
-        if self.out_ndisp: f_dn, a_dn, im_dn = create_fig(None, None, None, "归一化位移场 (纯拓扑方向)", is_2d=True,
-                                                           legend_kwargs={'mode': 'cartesian', 'max_val': 1.0, 'unit': '',
-                                                                          'label_x': 'u_norm', 'label_y': 'v_norm',
-                                                                          'is_norm': True})
-        if self.out_s3d: f_s3, a_s3, im_s3 = create_fig(None, None, None, "横向自旋角动量场 (Sx, Sy)", is_2d=True,
-                                                         legend_kwargs={'mode': 'cartesian', 'max_val': sxy_vmax,
-                                                                        'unit': '$mm^2/s$', 'label_x': 'Sx',
-                                                                        'label_y': 'Sy'})
+        if self.out_plots:
+            if self.out_hf: f_h, a_h, im_h = create_fig('seismic', h_vmin, h_vmax, "水位形变", "水位形变 (mm)")
+            if self.out_ph: f_p, a_p, im_p = create_fig('hsv', 0, 2 * np.pi, "相位角", "相位 (rad)")
+            if self.out_sz: f_sz, a_sz, im_sz = create_fig('viridis', sz_vmin, sz_vmax, "Z向自旋角动量",
+                                                            "自旋密度 ($mm^2/s$)")
+            if self.out_pa: f_pa, a_pa, im_pa = create_fig(None, None, None, "相位振幅复合场", is_2d=True,
+                                                            legend_kwargs={'mode': 'polar_rect', 'max_val': amp_vmax})
+            if self.out_disp: f_d, a_d, im_d = create_fig(None, None, None, "面内二维矢量位移场 (u, v)", is_2d=True,
+                                                           legend_kwargs={'mode': 'cartesian', 'max_val': uv_vmax,
+                                                                          'unit': 'mm', 'label_x': '位移 u',
+                                                                          'label_y': '位移 v'})
+            if self.out_ndisp: f_dn, a_dn, im_dn = create_fig(None, None, None, "归一化位移场 (纯拓扑方向)", is_2d=True,
+                                                               legend_kwargs={'mode': 'cartesian', 'max_val': 1.0,
+                                                                              'unit': '', 'label_x': 'u_norm',
+                                                                              'label_y': 'v_norm',
+                                                                              'is_norm': True})
+            if self.out_s3d: f_s3, a_s3, im_s3 = create_fig(None, None, None, "横向自旋角动量场 (Sx, Sy)", is_2d=True,
+                                                             legend_kwargs={'mode': 'cartesian', 'max_val': sxy_vmax,
+                                                                            'unit': '$mm^2/s$', 'label_x': 'Sx',
+                                                                            'label_y': 'Sy'})
 
-        if self.out_mom:
-            f_m, a_m, im_m = create_fig(None, None, None, "动量密度流场", is_2d=True,
-                                        legend_kwargs={'mode': 'polar_rect', 'max_val': amp_vmax})
-            a_m.set_title("动量密度流场", fontsize=11, pad=50, weight='bold')
-            a_m.text(0.02, 1.04, "图例说明: \n[背景] 彩色相幅复合场 (亮度=振幅, 色相=相位)\n[箭头] 动量流 / 斯托克斯漂移速度",
-                     transform=a_m.transAxes, fontsize=8, va='bottom',
-                     bbox=dict(facecolor='white', alpha=0.85, edgecolor='gray', boxstyle='round,pad=0.2'))
+            if self.out_mom:
+                f_m, a_m, im_m = create_fig(None, None, None, "动量密度流场", is_2d=True,
+                                            legend_kwargs={'mode': 'polar_rect', 'max_val': amp_vmax})
+                a_m.set_title("动量密度流场", fontsize=11, pad=50, weight='bold')
+                a_m.text(0.02, 1.04,
+                         "图例说明: \n[背景] 彩色相幅复合场 (亮度=振幅, 色相=相位)\n[箭头] 动量流 / 斯托克斯漂移速度",
+                         transform=a_m.transAxes, fontsize=8, va='bottom',
+                         bbox=dict(facecolor='white', alpha=0.85, edgecolor='gray', boxstyle='round,pad=0.2'))
 
-        X_grid, Y_grid = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
+            if getattr(self, 'out_3ddisp', True):
+                X_grid, Y_grid = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]))
+                slc_3d = slice(None, None, getattr(self, 'disp_step', 8))
+                disp_scale_val = getattr(self, 'disp_scale', 4.0)
+                disp_width_frac = 0.1 * (disp_scale_val / 4.0)
+                fixed_disp_scale = uv_vmax / (disp_width_frac + 1e-12)
 
-        slc_3d = slice(None, None, getattr(self, 'disp_step', 8))
-        disp_scale_val = getattr(self, 'disp_scale', 4.0)
-        disp_width_frac = 0.1 * (disp_scale_val / 4.0)
-        fixed_disp_scale = uv_vmax / (disp_width_frac + 1e-12)
+                f_3dd, a_3dd, im_3dd = create_fig('seismic', h_vmin, h_vmax, "三维位移场", label="水位高度 (mm)")
+                a_3dd.set_title("三维位移场", fontsize=11, pad=50, weight='bold')
+                a_3dd.text(0.02, 1.04,
+                           "图例说明: \n[背景] 瞬时水位高度 h (mm)\n[箭头] 面内瞬时位移场 (u, v)",
+                           transform=a_3dd.transAxes, fontsize=8, va='bottom',
+                           bbox=dict(facecolor='white', alpha=0.85, edgecolor='gray', boxstyle='round,pad=0.2'))
 
-        if getattr(self, 'out_3ddisp', True):
-            f_3dd, a_3dd, im_3dd = create_fig('seismic', h_vmin, h_vmax, "三维位移场", label="水位高度 (mm)")
-            a_3dd.set_title("三维位移场", fontsize=11, pad=50, weight='bold')
-            a_3dd.text(0.02, 1.04, "图例说明: \n[背景] 瞬时水位高度 h (mm)\n[箭头] 面内瞬时位移场 (u, v)",
-                       transform=a_3dd.transAxes, fontsize=8, va='bottom',
-                       bbox=dict(facecolor='white', alpha=0.85, edgecolor='gray', boxstyle='round,pad=0.2'))
+                q_3dd = a_3dd.quiver(X_grid[slc_3d, slc_3d], Y_grid[slc_3d, slc_3d],
+                                     np.zeros_like(X_grid[slc_3d, slc_3d]), np.zeros_like(Y_grid[slc_3d, slc_3d]),
+                                     color='black', scale=fixed_disp_scale, scale_units='width', angles='xy', alpha=0.8)
 
-            q_3dd = a_3dd.quiver(X_grid[slc_3d, slc_3d], Y_grid[slc_3d, slc_3d],
-                                 np.zeros_like(X_grid[slc_3d, slc_3d]), np.zeros_like(Y_grid[slc_3d, slc_3d]),
-                                 color='black', scale=fixed_disp_scale, scale_units='width', angles='xy', alpha=0.8)
+                exp_3d = np.floor(np.log10(uv_vmax * 0.5))
+                frac_3d = (uv_vmax * 0.5) / 10 ** exp_3d
+                nice_frac_3d = 1.0 if frac_3d < 2 else (2.0 if frac_3d < 5 else 5.0)
+                ref_len_3d = nice_frac_3d * 10 ** exp_3d
+                a_3dd.quiverkey(q_3dd, X=0.88, Y=1.06, U=ref_len_3d,
+                                label=f'{ref_len_3d:.2g} mm', labelpos='E', coordinates='axes', color='black',
+                                fontproperties={'size': 8})
 
-            exp_3d = np.floor(np.log10(uv_vmax * 0.5))
-            frac_3d = (uv_vmax * 0.5) / 10 ** exp_3d
-            nice_frac_3d = 1.0 if frac_3d < 2 else (2.0 if frac_3d < 5 else 5.0)
-            ref_len_3d = nice_frac_3d * 10 ** exp_3d
-            a_3dd.quiverkey(q_3dd, X=0.88, Y=1.06, U=ref_len_3d,
-                            label=f'{ref_len_3d:.2g} mm', labelpos='E', coordinates='axes', color='black',
-                            fontproperties={'size': 8})
+            if getattr(self, 'out_3dspin', True):
+                f_3ds, a_3ds, im_3ds = create_fig(None, None, None, "全分量自旋场", is_2d=True,
+                                                    legend_kwargs={'mode': 'spin_topology'})
+                a_3ds.set_title("全分量自旋场", fontsize=11, pad=50, weight='bold')
+                a_3ds.text(0.02, 1.04,
+                           "拓扑映射说明:\n色相(Hue) -> 横向自旋角\n明暗(V-S) -> Z向偏振极化",
+                           transform=a_3ds.transAxes, fontsize=8, va='bottom',
+                           bbox=dict(facecolor='white', alpha=0.85, edgecolor='gray', boxstyle='round,pad=0.2'))
 
-        if getattr(self, 'out_3dspin', True):
-            f_3ds, a_3ds, im_3ds = create_fig(None, None, None, "全分量自旋场", is_2d=True,
-                                                legend_kwargs={'mode': 'spin_topology'})
-            a_3ds.set_title("全分量自旋场", fontsize=11, pad=50, weight='bold')
-            a_3ds.text(0.02, 1.04, "拓扑映射说明:\n色相(Hue) -> 横向自旋角\n明暗(V-S) -> Z向偏振极化",
-                       transform=a_3ds.transAxes, fontsize=8, va='bottom',
-                       bbox=dict(facecolor='white', alpha=0.85, edgecolor='gray', boxstyle='round,pad=0.2'))
-
-        if self.out_amp:
+        if self.out_plots and self.out_amp:
             f_a, a_a, im_a = create_fig('hot', amp_vmin, amp_vmax, "全局水波振幅", "振幅 (mm)")
             im_a.set_data(amp_map)
             f_a.savefig(os.path.join(seq_out_dir, 'amplitude', 'Global_Amplitude_Envelope.jpg'), dpi=150,
                         bbox_inches='tight', pad_inches=0.02)
             plt.close(f_a)
 
+        if self.out_data and self.out_amp:
+            self._save_matrix_csv(os.path.join(seq_out_dir, 'amplitude'), 'Global_Amplitude_Envelope.csv', amp_map,
+                                  fmt='%.6g')
+
         for t in range(frames):
             tag = f"{t:03d}"
+            u_r = np.real(u_ana[t]) * 1000.0
+            v_r = np.real(v_ana[t]) * 1000.0
+            h_r = np.real(h_ana[t]) * 1000.0
+            uv_mag_t = np.sqrt(u_r ** 2 + v_r ** 2)
+            ph_norm = np.mod(np.arctan2(v_r, u_r), 2 * np.pi) / (2 * np.pi)
+            uv_safe = np.maximum(uv_mag_t, 1e-12)
+            u_norm_t = np.where(uv_mag_t > 0, u_r / uv_safe, 0.0)
+            v_norm_t = np.where(uv_mag_t > 0, v_r / uv_safe, 0.0)
 
-            if self.out_hf:
-                im_h.set_data(np.real(h_ana[t]) * 1000.0)
-                f_h.savefig(os.path.join(seq_out_dir, 'hfield', f'hfield_{tag}.jpg'), dpi=150, bbox_inches='tight',
-                            pad_inches=0.02)
+            if self.out_plots:
+                if self.out_hf:
+                    im_h.set_data(h_r)
+                    f_h.savefig(os.path.join(seq_out_dir, 'hfield', f'hfield_{tag}.jpg'), dpi=150,
+                                bbox_inches='tight', pad_inches=0.02)
 
-            if getattr(self, 'out_3ddisp', True):
-                im_3dd.set_data(np.real(h_ana[t]) * 1000.0)
-                u_fr, v_fr = np.real(u_ana[t]) * 1000.0, np.real(v_ana[t]) * 1000.0
-                q_3dd.set_UVC(u_fr[slc_3d, slc_3d], v_fr[slc_3d, slc_3d])
-                f_3dd.savefig(os.path.join(seq_out_dir, '3d_displacement', f'3d_disp_{tag}.jpg'), dpi=150,
-                              bbox_inches='tight', pad_inches=0.05)
+                if getattr(self, 'out_3ddisp', True):
+                    im_3dd.set_data(h_r)
+                    q_3dd.set_UVC(u_r[slc_3d, slc_3d], v_r[slc_3d, slc_3d])
+                    f_3dd.savefig(os.path.join(seq_out_dir, '3d_displacement', f'3d_disp_{tag}.jpg'), dpi=150,
+                                  bbox_inches='tight', pad_inches=0.05)
 
-            if getattr(self, 'out_3dspin', True):
-                spin_hsv = np.zeros((shape[0], shape[1], 3))
-                spin_hsv[..., 0] = (np.arctan2(sy[t], sx[t]) + np.pi) / (2 * np.pi)
-                sz_max_val = max(abs(sz_vmin), abs(sz_vmax)) + 1e-12
-                sz_norm = np.clip(sz[t] / sz_max_val, -1.0, 1.0)
-                spin_hsv[..., 1] = np.where(sz_norm > 0, 1.0 - sz_norm, 1.0)
-                spin_hsv[..., 2] = np.where(sz_norm > 0, 1.0, 1.0 + sz_norm)
-                im_3ds.set_data(matplotlib.colors.hsv_to_rgb(spin_hsv))
-                f_3ds.savefig(os.path.join(seq_out_dir, 's3d', f'full_spin_{tag}.jpg'), dpi=150,
-                              bbox_inches='tight', pad_inches=0.05)
+                if getattr(self, 'out_3dspin', True):
+                    spin_hsv = np.zeros((shape[0], shape[1], 3))
+                    spin_hsv[..., 0] = (np.arctan2(sy[t], sx[t]) + np.pi) / (2 * np.pi)
+                    sz_max_val = max(abs(sz_vmin), abs(sz_vmax)) + 1e-12
+                    sz_norm = np.clip(sz[t] / sz_max_val, -1.0, 1.0)
+                    spin_hsv[..., 1] = np.where(sz_norm > 0, 1.0 - sz_norm, 1.0)
+                    spin_hsv[..., 2] = np.where(sz_norm > 0, 1.0, 1.0 + sz_norm)
+                    im_3ds.set_data(matplotlib.colors.hsv_to_rgb(spin_hsv))
+                    f_3ds.savefig(os.path.join(seq_out_dir, 's3d', f'full_spin_{tag}.jpg'), dpi=150,
+                                  bbox_inches='tight', pad_inches=0.05)
 
-            if self.out_ph:
-                im_p.set_data(phase_w[t])
-                f_p.savefig(os.path.join(seq_out_dir, 'phase', f'phase_{tag}.jpg'), dpi=150, bbox_inches='tight',
-                            pad_inches=0.02)
-            if self.out_pa:
-                pa_hsv = np.zeros((shape[0], shape[1], 3))
-                pa_hsv[..., 0] = (np.angle(h_ana[t]) + np.pi) / (2 * np.pi);
-                pa_hsv[..., 1] = 1.0;
-                pa_hsv[..., 2] = np.clip(amp_map / (amp_vmax + 1e-10), 0, 1)
-                im_pa.set_data(matplotlib.colors.hsv_to_rgb(pa_hsv))
-                f_pa.savefig(os.path.join(seq_out_dir, 'phaseamp', f'phaseamp_{tag}.jpg'), dpi=150,
-                             bbox_inches='tight', pad_inches=0.02)
-            if self.out_disp or self.out_ndisp:
-                u_r, v_r = np.real(u_ana[t]) * 1000.0, np.real(v_ana[t]) * 1000.0
-                ph_norm = np.mod(np.arctan2(v_r, u_r), 2 * np.pi) / (2 * np.pi)
+                if self.out_ph:
+                    im_p.set_data(phase_w[t])
+                    f_p.savefig(os.path.join(seq_out_dir, 'phase', f'phase_{tag}.jpg'), dpi=150,
+                                bbox_inches='tight', pad_inches=0.02)
+                if self.out_pa:
+                    pa_hsv = np.zeros((shape[0], shape[1], 3))
+                    pa_hsv[..., 0] = (np.angle(h_ana[t]) + np.pi) / (2 * np.pi)
+                    pa_hsv[..., 1] = 1.0
+                    pa_hsv[..., 2] = np.clip(amp_map / (amp_vmax + 1e-10), 0, 1)
+                    im_pa.set_data(matplotlib.colors.hsv_to_rgb(pa_hsv))
+                    f_pa.savefig(os.path.join(seq_out_dir, 'phaseamp', f'phaseamp_{tag}.jpg'), dpi=150,
+                                 bbox_inches='tight', pad_inches=0.02)
                 if self.out_disp:
-                    hsv_d = np.zeros((shape[0], shape[1], 3));
-                    hsv_d[..., 0] = ph_norm;
-                    hsv_d[..., 1] = 1.0;
-                    hsv_d[..., 2] = np.clip(np.sqrt(u_r ** 2 + v_r ** 2) / (uv_vmax + 1e-10), 0, 1)
+                    hsv_d = np.zeros((shape[0], shape[1], 3))
+                    hsv_d[..., 0] = ph_norm
+                    hsv_d[..., 1] = 1.0
+                    hsv_d[..., 2] = np.clip(uv_mag_t / (uv_vmax + 1e-10), 0, 1)
                     im_d.set_data(matplotlib.colors.hsv_to_rgb(hsv_d))
                     f_d.savefig(os.path.join(seq_out_dir, 'displacement', f'disp_{tag}.jpg'), dpi=150,
                                 bbox_inches='tight', pad_inches=0.02)
                 if self.out_ndisp:
-                    hsv_dn = np.zeros((shape[0], shape[1], 3));
-                    hsv_dn[..., 0] = ph_norm;
-                    hsv_dn[..., 1] = 1.0;
+                    hsv_dn = np.zeros((shape[0], shape[1], 3))
+                    hsv_dn[..., 0] = ph_norm
+                    hsv_dn[..., 1] = 1.0
                     hsv_dn[..., 2] = 1.0
                     im_dn.set_data(matplotlib.colors.hsv_to_rgb(hsv_dn))
                     f_dn.savefig(os.path.join(seq_out_dir, 'norm_disp', f'norm_disp_{tag}.jpg'), dpi=150,
                                  bbox_inches='tight', pad_inches=0.02)
-            if self.out_sz:
-                im_sz.set_data(sz[t])
-                f_sz.savefig(os.path.join(seq_out_dir, 'sz', f'sz_{tag}.jpg'), dpi=150, bbox_inches='tight',
-                             pad_inches=0.02)
-            if self.out_s3d:
-                hsv_s3 = np.zeros((shape[0], shape[1], 3));
-                hsv_s3[..., 0] = np.mod(np.arctan2(sy[t], sx[t]), 2 * np.pi) / (2 * np.pi);
-                hsv_s3[..., 1] = 1.0;
-                hsv_s3[..., 2] = np.clip(np.sqrt(sx[t] ** 2 + sy[t] ** 2) / (sxy_vmax + 1e-10), 0, 1)
-                im_s3.set_data(matplotlib.colors.hsv_to_rgb(hsv_s3))
-                f_s3.savefig(os.path.join(seq_out_dir, 's2d', f's2d_{tag}.jpg'), dpi=150, bbox_inches='tight',
-                             pad_inches=0.02)
+                if self.out_sz:
+                    im_sz.set_data(sz[t])
+                    f_sz.savefig(os.path.join(seq_out_dir, 'sz', f'sz_{tag}.jpg'), dpi=150, bbox_inches='tight',
+                                 pad_inches=0.02)
+                if self.out_s3d:
+                    hsv_s3 = np.zeros((shape[0], shape[1], 3))
+                    hsv_s3[..., 0] = np.mod(np.arctan2(sy[t], sx[t]), 2 * np.pi) / (2 * np.pi)
+                    hsv_s3[..., 1] = 1.0
+                    hsv_s3[..., 2] = np.clip(np.sqrt(sx[t] ** 2 + sy[t] ** 2) / (sxy_vmax + 1e-10), 0, 1)
+                    im_s3.set_data(matplotlib.colors.hsv_to_rgb(hsv_s3))
+                    f_s3.savefig(os.path.join(seq_out_dir, 's2d', f's2d_{tag}.jpg'), dpi=150,
+                                 bbox_inches='tight', pad_inches=0.02)
 
-            if self.out_mom:
-                pa_hsv = np.zeros((shape[0], shape[1], 3));
-                pa_hsv[..., 0] = (np.angle(h_ana[t]) + np.pi) / (2 * np.pi);
-                pa_hsv[..., 1] = 1.0;
-                pa_hsv[..., 2] = np.clip(amp_map / (amp_vmax + 1e-10), 0, 1)
-                im_m.set_data(matplotlib.colors.hsv_to_rgb(pa_hsv))
-                a_m.set_xlim(0, shape[1] - 1);
-                a_m.set_ylim(shape[0] - 1, 0)
-                slc = slice(None, None, self.q_step)
-                mask = np.sqrt(Px_all[t] ** 2 + Py_all[t] ** 2)[slc, slc] > (global_max_p * 0.05)
-                q = a_m.quiver(X_grid[slc, slc][mask], Y_grid[slc, slc][mask], Px_all[t][slc, slc][mask],
-                               Py_all[t][slc, slc][mask], color='cyan', scale=fixed_scale, scale_units='width',
-                               angles='xy')
-                qk = a_m.quiverkey(q, X=0.88, Y=1.06, U=ref_len, label=f'{ref_len:.1e} $mm/s$', labelpos='E',
-                                   coordinates='axes', color='red', fontproperties={'size': 8})
-                f_m.savefig(os.path.join(seq_out_dir, 'momentum', f'momentum_{tag}.jpg'), dpi=150,
-                            bbox_inches='tight', pad_inches=0.05)
-                q.remove();
-                qk.remove()
+                if self.out_mom:
+                    pa_hsv = np.zeros((shape[0], shape[1], 3))
+                    pa_hsv[..., 0] = (np.angle(h_ana[t]) + np.pi) / (2 * np.pi)
+                    pa_hsv[..., 1] = 1.0
+                    pa_hsv[..., 2] = np.clip(amp_map / (amp_vmax + 1e-10), 0, 1)
+                    im_m.set_data(matplotlib.colors.hsv_to_rgb(pa_hsv))
+                    a_m.set_xlim(0, shape[1] - 1)
+                    a_m.set_ylim(shape[0] - 1, 0)
+                    slc = slice(None, None, self.q_step)
+                    mask = np.sqrt(Px_all[t] ** 2 + Py_all[t] ** 2)[slc, slc] > (global_max_p * 0.05)
+                    q = a_m.quiver(X_grid[slc, slc][mask], Y_grid[slc, slc][mask], Px_all[t][slc, slc][mask],
+                                   Py_all[t][slc, slc][mask], color='cyan', scale=fixed_scale, scale_units='width',
+                                   angles='xy')
+                    qk = a_m.quiverkey(q, X=0.88, Y=1.06, U=ref_len, label=f'{ref_len:.1e} $mm/s$', labelpos='E',
+                                       coordinates='axes', color='red', fontproperties={'size': 8})
+                    f_m.savefig(os.path.join(seq_out_dir, 'momentum', f'momentum_{tag}.jpg'), dpi=150,
+                                bbox_inches='tight', pad_inches=0.05)
+                    q.remove()
+                    qk.remove()
+
+            if self.out_data:
+                if self.out_hf:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'hfield'), f'hfield_{tag}.csv', h_r, fmt='%.6g')
+                if getattr(self, 'out_3ddisp', True):
+                    self._save_matrix_csv(os.path.join(seq_out_dir, '3d_displacement'), f'3d_disp_h_{tag}.csv',
+                                          h_r, fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, '3d_displacement'), f'3d_disp_u_{tag}.csv',
+                                          u_r, fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, '3d_displacement'), f'3d_disp_v_{tag}.csv',
+                                          v_r, fmt='%.6g')
+                if getattr(self, 'out_3dspin', True):
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 's3d'), f'full_spin_sx_{tag}.csv',
+                                          sx[t], fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 's3d'), f'full_spin_sy_{tag}.csv',
+                                          sy[t], fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 's3d'), f'full_spin_sz_{tag}.csv',
+                                          sz[t], fmt='%.6g')
+                if self.out_ph:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'phase'), f'phase_{tag}.csv',
+                                          phase_w[t], fmt='%.6g')
+                if self.out_pa:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'phaseamp'), f'phaseamp_phase_{tag}.csv',
+                                          phase_w[t], fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'phaseamp'), f'phaseamp_amp_{tag}.csv',
+                                          amp_map, fmt='%.6g')
+                if self.out_disp:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'displacement'), f'disp_u_{tag}.csv',
+                                          u_r, fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'displacement'), f'disp_v_{tag}.csv',
+                                          v_r, fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'displacement'), f'disp_uvmag_{tag}.csv',
+                                          uv_mag_t, fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'displacement'), f'disp_ph_norm_{tag}.csv',
+                                          ph_norm, fmt='%.6g')
+                if self.out_ndisp:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'norm_disp'), f'norm_disp_u_{tag}.csv',
+                                          u_norm_t, fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'norm_disp'), f'norm_disp_v_{tag}.csv',
+                                          v_norm_t, fmt='%.6g')
+                if self.out_sz:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'sz'), f'sz_{tag}.csv', sz[t], fmt='%.6g')
+                if self.out_s3d:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 's2d'), f's2d_sx_{tag}.csv', sx[t], fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 's2d'), f's2d_sy_{tag}.csv', sy[t], fmt='%.6g')
+                if self.out_mom:
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'momentum'), f'momentum_px_{tag}.csv',
+                                          Px_all[t], fmt='%.6g')
+                    self._save_matrix_csv(os.path.join(seq_out_dir, 'momentum'), f'momentum_py_{tag}.csv',
+                                          Py_all[t], fmt='%.6g')
 
         plt.close('all')
-        log_c = f"===== 序列高级物理与拓扑分析完成 =====\n输出目录: {seq_out_dir}\n处理帧数: {frames} 帧\n"
+
+        amp_stats = (float(np.nanmin(amp_map)), float(np.nanmax(amp_map)),
+                     float(np.nanmean(amp_map)), float(np.nanstd(amp_map)))
+        h_abs_min = float(np.nanmin(np.abs(h_r)))
+        h_abs_max = float(np.nanmax(np.abs(h_r)))
+
+        log_c = (f"===== 序列高级物理与拓扑分析完成 =====\n"
+                 f"输出目录: {seq_out_dir}\n"
+                 f"处理帧数: {frames} 帧\n"
+                 f"帧率: {fps} fps\n"
+                 f"时间步长 dt: {dt:.6f} s\n"
+                 f"序列时长: {frames / fps:.4f} s\n"
+                 f"{self._params_to_log(params)}\n\n"
+                 f"===== 序列物理场统计 ====="
+                 f"\n振幅包络 amp (mm): min={amp_stats[0]:.5g}, max={amp_stats[1]:.5g}, "
+                 f"mean={amp_stats[2]:.5g}, std={amp_stats[3]:.5g}"
+                 f"\n瞬时水位 |h| (mm): min={h_abs_min:.5g}, max={h_abs_max:.5g}\n")
+
+        if self.out_plots:
+            log_c += "\n===== 可视化图片输出 =====\n"
+            log_c += f"图片输出目录: {seq_out_dir}\n已按所选类型逐帧输出 jpg 图。\n"
+        else:
+            log_c += "\n可视化图片输出已关闭 (out_plots=False)。\n"
+
+        if self.out_data:
+            t_arr = np.arange(frames) / fps
+            np.savetxt(os.path.join(seq_out_dir, 'time_array.csv'), t_arr, delimiter=',',
+                       header='Time(s)', comments='')
+            self._save_matrix_csv(seq_out_dir, 'water_mask.csv', water_mask_crop, fmt='%.3f')
+            self._save_parameters_json(seq_out_dir, "sequence", params)
+            log_c += "\n===== 结构化数据输出 (CSV/JSON) =====\n"
+            log_c += f"数据输出目录: {seq_out_dir}\n"
+            log_c += f"每类结果图已同步导出同名 CSV 矩阵，详见各子目录；参数 JSON 已写入该目录。\n"
+        else:
+            log_c += "\n结构化数据输出已关闭 (out_data=False)。\n"
+
         return os.path.join(seq_out_dir, 'hfield'), self.write_log("ImageSeq", log_c, target_dir=seq_out_dir)
 
     def run_calibration(self, calib_dir, fps, in_period):
@@ -1301,6 +1538,12 @@ class FCDCore:
 
         Iref_sub = Iref[sy1:sy2, sx1:sx2]
         mm_per_pixel = self._estimate_mm_per_pixel(Iref_sub)
+        cal_params = self._collect_parameters(Iref_sub, mm_per_pixel)
+        cal_params["calib_dir"] = calib_dir
+        cal_params["calib_fps"] = fps
+        cal_params["calib_period_ms"] = in_period
+        cal_params["calib_roi_px"] = [sx1, sx2, sy1, sy2]
+        cal_params["num_speakers"] = num_speakers
         e = self.edge
 
         speaker_pts = []
@@ -1457,6 +1700,7 @@ class FCDCore:
         log_c += f"定标拓扑形状: {'圆形阵列' if is_circle else '直线阵列'}\n"
         log_c += f"定标换能器点数: {num_speakers} 个独立通道\n"
         log_c += f"全阵列物理无失真波高上限: {global_max_amp:.4f} mm\n"
+        log_c += self._params_to_log(cal_params) + "\n\n"
         log_c += f"寻峰质检图已输出至: {img_out_dir}\n"
         log_c += f"阵列修正矩阵已落盘至: {out_json}\n"
         return self.write_log("Calibration", log_c, target_dir=calib_out_dir)

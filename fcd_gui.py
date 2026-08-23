@@ -10,7 +10,7 @@ class FCDApp:
     def __init__(self, root):
         self.root = root
         self.root.title("FCD水波波场分析系统")
-        self.root.geometry("820x800") # 稍微把窗口高度加一点点，从 720 改为 800
+        self.root.geometry("860x900")
         
         self.config = AppConfig("fcd_path_cache.json")
         
@@ -36,6 +36,9 @@ class FCDApp:
         self.out_var = tk.StringVar()
         self._add_path_row(path_frame, "输出/日志目录:", self.out_var, 3, is_dir=True)
 
+        # 新增：实验驱动周期，用于记录后续频域分析所需的设置参数
+        self.seq_period_var = tk.StringVar(value="150.0")
+
         cfg_btn_frame = ttk.Frame(path_frame)
         cfg_btn_frame.grid(row=4, column=0, columnspan=3, pady=4, sticky="ew")
         ttk.Button(cfg_btn_frame, text="保存当前全部配置(含高级参数)", command=self.save_path_config).pack(side=tk.LEFT, padx=5)
@@ -58,6 +61,11 @@ class FCDApp:
         ttk.Label(self.param_frame, text="序列帧率(FPS):").grid(row=0, column=7, padx=10)
         self.seq_fps_var = tk.StringVar(value="30.0")
         ttk.Entry(self.param_frame, textvariable=self.seq_fps_var, width=6).grid(row=0, column=8)
+
+        ttk.Label(self.param_frame, text="实验驱动周期(ms):").grid(row=1, column=0, padx=5, pady=4, sticky="e")
+        ttk.Entry(self.param_frame, textvariable=self.seq_period_var, width=8).grid(row=1, column=1, sticky="w")
+        ttk.Label(self.param_frame, text="用于日志记录；留空则不在日志中推算驱动频率",
+                  font=("", 8), foreground="dimgray").grid(row=1, column=2, sticky="w", padx=5)
 
         # 3. 高级菜单
         self.toggle_btn = ttk.Button(self.root, text="▶ 展开参数微调与序列分析面板", command=self.toggle_advanced_menu)
@@ -124,6 +132,15 @@ class FCDApp:
         ttk.Checkbutton(seq_frm, text="动量密度流场(momentum)", variable=self.chk_mom).grid(row=2, column=2, sticky="w", padx=5, pady=2)        
         ttk.Checkbutton(seq_frm, text="三维位移场 (3ddisp)", variable=self.chk_3ddisp).grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=2)
         ttk.Checkbutton(seq_frm, text="全分量自旋场 (s3d)", variable=self.chk_3dspin).grid(row=3, column=2, columnspan=2, sticky='w', padx=5, pady=2)
+
+        # 新增：输出总控开关（可视化图片 / 结构化原始数据）
+        self.chk_plots = tk.BooleanVar(value=True)
+        self.chk_data = tk.BooleanVar(value=True)
+        ttk.Label(self.adv_frame, text="8. 输出总控开关:").grid(row=7, column=0, sticky="e", pady=8)
+        out_frm = ttk.Frame(self.adv_frame)
+        out_frm.grid(row=7, column=1, columnspan=2, sticky="w", pady=5)
+        ttk.Checkbutton(out_frm, text="可视化图片输出 (jpg/png)", variable=self.chk_plots).pack(side=tk.LEFT, padx=8)
+        ttk.Checkbutton(out_frm, text="结构化原始数据输出 (CSV/JSON)", variable=self.chk_data).pack(side=tk.LEFT, padx=8)
 
         # 4. 操作与日志区
         action_frame = ttk.LabelFrame(self.root, text="执行操作", padding=10)
@@ -195,6 +212,7 @@ class FCDApp:
             "cal_period": self.cal_period.get(),
             "water_depth": self.water_depth_var.get(),
             "seq_fps": self.seq_fps_var.get(),
+            "seq_period": self.seq_period_var.get(),
             "crop_x1": self.crop_x1.get(),
             "crop_x2": self.crop_x2.get(),
             "crop_y1": self.crop_y1.get(),
@@ -217,6 +235,10 @@ class FCDApp:
             "chk_ph": self.chk_ph.get(),
             "chk_pa": self.chk_pa.get(),
             "chk_mom": self.chk_mom.get(),
+            "chk_3ddisp": self.chk_3ddisp.get(),
+            "chk_3dspin": self.chk_3dspin.get(),
+            "chk_plots": self.chk_plots.get(),
+            "chk_data": self.chk_data.get(),
         })
         self.config.save()
         self.log("全部配置已成功保存！下次启动将自动恢复。")
@@ -233,6 +255,7 @@ class FCDApp:
         self.cal_period.set(cfg.get("cal_period", 150.0))
         self.water_depth_var.set(cfg.get("water_depth", "30.0"))
         self.seq_fps_var.set(cfg.get("seq_fps", "30.0"))
+        self.seq_period_var.set(cfg.get("seq_period", "150.0"))
         self._set_entry_val(self.crop_x1, cfg.get("crop_x1", "0"))
         self._set_entry_val(self.crop_x2, cfg.get("crop_x2", "0"))
         self._set_entry_val(self.crop_y1, cfg.get("crop_y1", "0"))
@@ -256,6 +279,10 @@ class FCDApp:
         self.chk_ph.set(cfg.get("chk_ph", True))
         self.chk_pa.set(cfg.get("chk_pa", True))
         self.chk_mom.set(cfg.get("chk_mom", True))
+        self.chk_3ddisp.set(cfg.get("chk_3ddisp", True))
+        self.chk_3dspin.set(cfg.get("chk_3dspin", True))
+        self.chk_plots.set(cfg.get("chk_plots", True))
+        self.chk_data.set(cfg.get("chk_data", True))
 
     def _get_core(self):
         def safe_int(v, default=0):
@@ -276,6 +303,7 @@ class FCDApp:
             crop_pixels=crop,
             water_depth=safe_float(self.water_depth_var.get(), 30.0),
             fps=safe_float(self.seq_fps_var.get(), 30.0),
+            period_ms=safe_float(self.seq_period_var.get(), 0.0) or None,
             low_pass_suppress=safe_float(self.adv_low_pass.get(), 65.0),
             krad_factor=safe_float(self.adv_krad.get(), 0.28),
             edge_width=safe_int(self.adv_edge.get(), 10),
@@ -289,7 +317,9 @@ class FCDApp:
             q_step=safe_int(self.adv_qstep.get(), 6),
             q_scale=safe_float(self.adv_qscale.get(), 4.0),
             disp_step=safe_int(self.adv_dstep.get(), 8),         # 新增传递
-            disp_scale=safe_float(self.adv_dscale.get(), 14.0)   # 新增传递
+            disp_scale=safe_float(self.adv_dscale.get(), 14.0),   # 新增传递
+            out_plots=self.chk_plots.get(),
+            out_data=self.chk_data.get(),
         )
         core.out_3ddisp = self.chk_3ddisp.get()
         core.out_3dspin = self.chk_3dspin.get()

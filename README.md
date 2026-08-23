@@ -80,6 +80,34 @@ pip install numpy opencv-python scipy matplotlib pyserial scikit-image
 - 交互式选取有效像素边框
 - 封装单帧波场解析、连续帧批处理、点波源测距以及斯格明子拓扑 Q 值计算等核心任务的触发入口
 - 统一的路径配置持久化管理
+- **输出总控开关**：可分别勾选“可视化图片输出 (jpg/png)”和“结构化原始数据输出 (CSV/JSON)”，互不干扰
+- **实验驱动周期 (ms)**：填写后可记录到日志，用于后续推算驱动频率等实验设置
+
+#### 单帧分析输出
+
+除原有 h/u/v 矩阵 CSV 外，新增：
+
+- `uv_mag_matrix_*.csv`：面内位移幅值
+- `disp_direction_matrix_*.csv`：位移方向（归一化角相位，0~1，乘以 2π 得弧度）
+- `norm_disp_u/v_matrix_*.csv`：归一化位移分量
+- `water_mask_matrix_*.csv`：有效水区掩膜
+- `single_parameters_*.json`：全部输入参数、mm/px 换算、载波信息等
+- `Log_SingleFrame_*.txt`：详细参数、物理场统计与输出文件清单
+
+#### 序列分析输出
+
+每个已勾选结果类型均会按帧同步导出同名 CSV，例如：
+
+- `hfield/hfield_000.csv` ↔ `hfield_000.jpg`
+- `amplitude/Global_Amplitude_Envelope.csv` ↔ `Global_Amplitude_Envelope.jpg`
+- `phase/phase_000.csv` ↔ `phase_000.jpg`
+- `displacement/disp_u_000.csv`、`disp_v_000.csv`、`disp_uvmag_000.csv`、`disp_ph_norm_000.csv` ↔ `disp_000.jpg`
+- `norm_disp/norm_disp_u_000.csv` 等 ↔ `norm_disp_000.jpg`
+- `sz/sz_000.csv`、`s2d/s2d_sx_000.csv`、`momentum/momentum_px_000.csv`、`s3d/full_spin_sx_000.csv` 等
+
+序列根目录还会输出 `time_array.csv`、`water_mask.csv`、`sequence_parameters_*.json` 和包含全部参数与统计的 `Log_ImageSeq_*.txt`。
+
+> 注意：序列的逐帧 CSV 为 `像素行×像素列` 矩阵，按帧导出会产生较多文件，且数据量可能很大；建议按需勾选类型，或在仅需快速查看时关闭结构化数据输出。
 
 ### 流体力学计算引擎 (`backend/core.py`)
 
@@ -89,6 +117,7 @@ pip install numpy opencv-python scipy matplotlib pyserial scikit-image
 - **Sylvester 特征空间积分** (`_fftinvgrad`)：利用有限差分矩阵对称性在特征空间进行 O(N²) 标量求解，避免传统 FFT 积分的周期性卷叠伪影
 - **时均场静态本底分离** (`process_sequence`)：提取时间平均场并施加刚性 2 阶曲面拟合，剥离由相机微震动和镜头呼吸效应引发的大尺度积分漂移
 - **靶向自动定标输出** (`run_calibration`)：自动搜索极值幅度中心点执行 Sine Fitting，输出 `speaker_lut_calibration.json` 补偿文件
+- **结构化输出开关**：`FCDCore(..., out_plots=..., out_data=...)` 分别控制图片与 CSV/JSON 输出
 
 ### 配置管理 (`config/settings.py`)
 
